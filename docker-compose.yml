@@ -1,0 +1,17 @@
+services:
+  job-launcher:
+    build: .
+    container_name: job-launcher
+    restart: unless-stopped
+    # Bind only on the server loopback — not reachable from other hosts on the network.
+    # From your laptop: ssh -N -L 5000:127.0.0.1:5000 you@server
+    # then open http://127.0.0.1:5000 locally.
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # lets the app run docker commands
+      - /home/julian/code/4d-ptv-mcflow:/repo                   # your project repo root
+      - ./jobs.yaml:/config/jobs.yaml              # job definitions
+    environment:
+      - JOBS_CONFIG=/config/jobs.yaml
+      - REPO_ROOT=/repo

@@ -1,0 +1,58 @@
+ntfy:
+  topic: "your-topic-here"           # replace with your ntfy topic
+  server: "https://ntfy.sh"
+
+jobs:
+  - id: compute_rays
+    name: Compute Rays (All Runs)
+    description: Compute rays for all runs in a case. Run after center finding.
+    script: ./docker/compute_rays_all_runs/run_compute_rays_all_runs.sh
+    args: ["run"]
+    env:
+      - name: OUTPUT_DIR
+        label: Output Directory
+        default: /mnt/raid
+        required: true
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/low_threshold/PTV_above
+      - name: CASE
+        label: Case
+        default: TTI_no_gravity
+        placeholder: e.g. TTI_no_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: ""
+        placeholder: e.g. Run1,Run2 (leave empty for all)
+      - name: RAYS_CENTER_ROTATE
+        label: Center Rotate (per camera)
+        default: cw,cw,ccw,ccw
+        placeholder: e.g. cw,cw,ccw,ccw or pairwise
+      - name: RAYS_IMAGE_WIDTH
+        label: Image Width (px)
+        default: "2560"
+      - name: RAYS_IMAGE_HEIGHT
+        label: Image Height (px)
+        default: "1600"
+      - name: H5_FLUSH_EVERY
+        label: H5 Flush Every
+        default: ""
+        placeholder: e.g. 50
+      - name: N_WORKERS
+        label: Number of Workers
+        default: ""
+        placeholder: e.g. 4
+      - name: IMAGE_NAME
+        label: Docker Image Name
+        default: 4d-ptv-compute-rays-all-runs
+
+  # Add more jobs below following the same structure:
+  # - id: my_job
+  #   name: My Job
+  #   description: What this job does
+  #   script: ./docker/my_job/run_my_job.sh
+  #   args: ["run"]
+  #   env:
+  #     - name: OUTPUT_DIR
+  #       label: Output Directory
+  #       default: /mnt/raid
