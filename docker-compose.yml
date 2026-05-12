@@ -12,6 +12,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # lets the app run docker commands
       - /home/julian/code/4d-ptv-mcflow:/repo                   # your project repo root
       - ./jobs.yaml:/config/jobs.yaml              # job definitions
+      - ./run_history.json:/config/run_history.json # persisted run history (create empty file or let app write)
     environment:
       - JOBS_CONFIG=/config/jobs.yaml
       - REPO_ROOT=/repo
+      - RUN_HISTORY_PATH=/config/run_history.json

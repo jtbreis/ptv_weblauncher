@@ -46,13 +46,127 @@ jobs:
         label: Docker Image Name
         default: 4d-ptv-compute-rays-all-runs
 
-  # Add more jobs below following the same structure:
-  # - id: my_job
-  #   name: My Job
-  #   description: What this job does
-  #   script: ./docker/my_job/run_my_job.sh
-  #   args: ["run"]
-  #   env:
-  #     - name: OUTPUT_DIR
-  #       label: Output Directory
-  #       default: /mnt/raid
+  - id: stereo_matching
+    name: Stereo Matching (All Runs)
+    description: STM for all runs in a case. Expects rays.h5 per run (after compute rays).
+    script: ./docker/stereo_matching_all_runs/run_stereo_matching_all_runs.sh
+    args: ["run"]
+    env:
+      - name: OUTPUT_DIR
+        label: Output Directory
+        default: /mnt/raid
+        required: true
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/low_threshold/PTV_above
+      - name: CASE
+        label: Case
+        default: TTI_no_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+        placeholder: e.g. Run1 or Run1,Run2
+      - name: N_THREADS
+        label: STM Threads
+        default: "64"
+      - name: MIN_CAMERAS
+        label: Min Cameras
+        default: "3"
+      - name: MAX_DISTANCE
+        label: Max Distance
+        default: "0.1"
+      - name: MULTIPLE_MATCHES_PER_RAY_DISTANCE
+        label: Multiple Matches Per Ray Distance
+        default: "0.5"
+      - name: MAX_MATCHES_PER_RAY
+        label: Max Matches Per Ray
+        default: "4"
+      - name: NVOXELS
+        label: N Voxels (comma-separated)
+        default: "700,1100,400"
+      - name: BOUNDING_BOX
+        label: Bounding Box (xmin,xmax,ymin,ymax,zmin,zmax)
+        default: "-35,35,-55,55,-25,25"
+      - name: TIMING
+        label: STM Timing (set to 1 to enable)
+        default: "1"
+        placeholder: "1 or leave empty"
+      - name: SPATIAL_BOXES
+        label: Spatial Boxes
+        default: "16"
+      - name: SPATIAL_OVERLAP_CELLS
+        label: Spatial Overlap Cells
+        default: "1"
+      - name: FRAME_PARALLELISM
+        label: Frame Parallelism
+        default: "6"
+      - name: IMAGE_NAME
+        label: Docker Image Name
+        default: 4d-ptv-stereo-matching-all-runs
+
+  - id: tracking
+    name: Tracking / 4-Frame (All Runs)
+    description: 4-frame tracking for all runs. Expects rays_out_cpp.h5 (after stereo matching). Requires 4BE-ETI in the image build context.
+    script: ./docker/tracking_all_runs/run_tracking_all_runs.sh
+    args: ["run"]
+    env:
+      - name: OUTPUT_DIR
+        label: Output Directory
+        default: /mnt/raid
+        required: true
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/low_threshold/PTV_above
+      - name: CASE
+        label: Case
+        default: TTI_no_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+      - name: WORKERS
+        label: Workers
+        default: "64"
+      - name: BOX_SIZE_X
+        label: Box Size X
+        default: "3.5"
+      - name: BOX_SIZE_INITIAL_X_LO
+        label: Box Initial X Low
+        default: "-1.0"
+      - name: BOX_SIZE_INITIAL_X_HI
+        label: Box Initial X High
+        default: "3.5"
+      - name: BOX_SIZE_Y
+        label: Box Size Y
+        default: "1.5"
+      - name: BOX_SIZE_Z
+        label: Box Size Z
+        default: "1.5"
+      - name: BOX_SIZE_TRACK
+        label: Box Size Track
+        default: "0.15"
+      - name: DT
+        label: DT
+        default: "1e-3"
+      - name: REP_RATE
+        label: Rep Rate
+        default: "10"
+      - name: POSITION_UNIT
+        label: Position Unit
+        default: mm
+      - name: RAYS_FILENAME
+        label: Rays Filename
+        default: ""
+        placeholder: default rays_out_cpp.h5 if empty
+      - name: MAX_FRAME_RANGES
+        label: Max Frame Ranges (smoke test)
+        default: ""
+        placeholder: e.g. 3 to limit frames
+      - name: NO_WRITE_PARAVIEW
+        label: No Write Paraview (set to 1)
+        default: ""
+      - name: WRITE_FAILED_TRACKS
+        label: Write Failed Tracks (set to 1)
+        default: ""
+      - name: IMAGE_NAME
+        label: Docker Image Name
+        default: 4d-ptv-tracking-all-runs

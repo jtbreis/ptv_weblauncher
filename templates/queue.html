@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Queue — Job Launcher{% endblock %}
+{% block body %}
+<main class="main" style="max-width:900px;margin:0 auto;width:100%">
+  <div class="content">
+    <h1 class="page-title">Sequential queue</h1>
+    <p class="page-desc">Queued jobs run one after another in FIFO order. Immediate <strong>Launch</strong> from the Launch page still runs in parallel; only items added with <strong>Add to queue</strong> are serialized here.</p>
+
+    <div class="form-section">
+      <div class="form-section-title">Running (from queue)</div>
+      <div id="runner-box" class="log-panel" style="margin-bottom:24px;padding:14px;background:var(--bg2)">
+        <p id="runner-empty" class="page-desc" style="margin-bottom:0">Nothing running from the queue right now.</p>
+        <div id="runner-active" hidden>
+          <p style="margin-bottom:8px"><span class="badge running pulse">running</span> <span id="runner-name"></span></p>
+          <p style="font-family:var(--mono);font-size:11px;color:var(--text3)">run_id: <span id="runner-runid"></span> · queue_id: <span id="runner-qid"></span></p>
+          <p style="margin-top:8px"><a id="runner-link" href="#" class="btn-secondary">Open logs / re-run</a></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Waiting (<span id="waiting-count">0</span>)</div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Job</th>
+              <th>Queued</th>
+              <th>queue id</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="waiting-body"></tbody>
+        </table>
+      </div>
+      <p id="waiting-msg" class="page-desc" style="margin-top:12px;display:none"></p>
+    </div>
+  </div>
+</main>
+<script>
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+async function load() {
+  const res = await fetch('/api/queue');
+  const d = await res.json();
+  const w = d.waiting || [];
+
+  document.getElementById('waiting-count').textContent = w.length;
+
+  const run = d.running;
+  document.getElementById('runner-empty').hidden = !!run;
+  document.getElementById('runner-active').hidden = !run;
+  if (run) {
+    document.getElementById('runner-name').textContent = run.job_name || '';
+    document.getElementById('runner-runid').textContent = esc(run.run_id || '');
+    document.getElementById('runner-qid').textContent = esc((run.queue_id || '').slice(0,8)) + '…';
+    document.getElementById('runner-link').href = '/runs/' + encodeURIComponent(run.run_id);
+  }
+
+  const tb = document.getElementById('waiting-body');
+  if (!w.length) {
+    tb.innerHTML = '<tr><td colspan="5" style="color:var(--text3)">Queue is empty.</td></tr>';
+  } else {
+    tb.innerHTML = w.map((it, i) => `
+      <tr>
+        <td style="font-family:var(--mono)">${i + 1}</td>
+        <td>${esc(it.job_name || '')}<div style="font-size:11px;color:var(--text3)">${esc(it.job_id || '')}</div></td>
+        <td style="font-family:var(--mono);font-size:11px">${esc(it.queued_at || '')}</td>
+        <td style="font-family:var(--mono);font-size:10px">${esc((it.queue_id || '').slice(0,8))}…</td>
+        <td><button type="button" class="btn-secondary rm-btn" data-qid="${esc(it.queue_id)}">Remove</button></td>
+      </tr>
+    `).join('');
+    tb.querySelectorAll('.rm-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const qid = btn.getAttribute('data-qid');
+        const r = await fetch('/api/queue/' + encodeURIComponent(qid), { method: 'DELETE' });
+        if (!r.ok) { alert('Could not remove (already started or unknown id)'); }
+        load();
+      });
+    });
+  }
+}
+load();
+setInterval(load, 3000);
+</script>
+{% endblock %}

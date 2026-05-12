@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Run history — Job Launcher{% endblock %}
+{% block body %}
+<main class="main" style="max-width:1200px;margin:0 auto;width:100%">
+  <div class="content">
+    <h1 class="page-title">Run history</h1>
+    <p class="page-desc">Completed and failed runs (newest first), including parameters used. Stored under <code>{{ run_history_path }}</code>.</p>
+    <div class="table-wrap">
+      <table class="data-table" id="hist-table">
+        <thead>
+          <tr>
+            <th>Finished</th>
+            <th>Job</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th>Exit</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="hist-body">
+          <tr><td colspan="6" style="color:var(--text3)">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+<script>
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+async function load() {
+  const res = await fetch('/api/history');
+  const data = await res.json();
+  const items = data.items || [];
+  const tb = document.getElementById('hist-body');
+  if (!items.length) {
+    tb.innerHTML = '<tr><td colspan="6" style="color:var(--text3)">No recorded runs yet.</td></tr>';
+    return;
+  }
+  tb.innerHTML = items.map(r => `
+    <tr>
+      <td style="font-family:var(--mono);font-size:11px">${esc(r.finished_at || r.started_at || '')}</td>
+      <td>${esc(r.job_name || '')}<div style="font-size:11px;color:var(--text3);margin-top:4px">${esc(r.job_id || '')}</div></td>
+      <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
+      <td style="font-family:var(--mono)">${r.duration != null ? esc(String(r.duration)) + 's' : '—'}</td>
+      <td style="font-family:var(--mono)">${r.exit_code != null ? esc(String(r.exit_code)) : '—'}</td>
+      <td><a href="/runs/${encodeURIComponent(r.run_id)}">Open / Re-run</a></td>
+    </tr>
+  `).join('');
+}
+load();
+setInterval(load, 8000);
+</script>
+{% endblock %}

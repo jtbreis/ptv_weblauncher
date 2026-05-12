@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run_id[:8] }} — Job Launcher{% endblock %}
+{% block body %}
+<main class="main" style="max-width:960px;margin:0 auto;width:100%">
+  <div class="content">
+    <p class="page-desc"><a href="{{ url_for('history_page') }}" class="btn-secondary" style="padding:4px 10px">← History</a>
+      <a href="{{ url_for('running_page') }}" class="btn-secondary" style="padding:4px 10px;margin-left:8px">Running</a></p>
+    <h1 class="page-title">{{ job_cfg.name|e }}</h1>
+    <p class="page-desc">{{ job_cfg.description|e if job_cfg.description else '' }}</p>
+    <p style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:16px">run_id: {{ run_id|e }}</p>
+
+    <div class="actions-row" style="margin-bottom:8px">
+      <span class="badge {{ status|e }}">{{ status|e }}</span>
+      {% if started_at %}<span style="color:var(--text2);font-size:12px">Started {{ started_at|e }}</span>{% endif %}
+      {% if finished_at %}<span style="color:var(--text2);font-size:12px">Finished {{ finished_at|e }}</span>{% endif %}
+      {% if duration is not none %}<span style="color:var(--text2);font-size:12px">{{ duration }}s</span>{% endif %}
+      {% if exit_code is not none %}<span style="color:var(--text2);font-size:12px">exit {{ exit_code }}</span>{% endif %}
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Edit parameters and re-run</div>
+      <form id="rerun-form" class="env-grid" style="margin-bottom:8px">
+        <input type="hidden" id="job_id" value="{{ job_cfg.id|e }}" />
+        {% for e in job_cfg.env or [] %}
+        <div class="env-field{% if e.name in ['OUTPUT_DIR','OUTPUT_BASE','BOUNDING_BOX','NVOXELS'] %} full{% endif %}">
+          <label class="env-label" for="f-{{ e.name|e }}">
+            {% if e.required %}<span class="required-dot"></span>{% endif %}
+            {{ e.label|e }}
+            <span class="env-var-name">{{ e.name|e }}</span>
+          </label>
+          <input
+            id="f-{{ e.name|e }}"
+            name="{{ e.name|e }}"
+            value="{{ (env_used.get(e.name, e.default) or '')|e }}"
+            placeholder="{{ (e.placeholder or '')|e }}"
+            data-required="{{ 'true' if e.required else 'false' }}"
+          />
+        </div>
+        {% endfor %}
+      </form>
+      {% if extra_env %}
+      <div class="form-section-title" style="margin-top:20px">Parameters not in current job template</div>
+      <div class="env-grid" id="extra-params">
+        {% for name, val in extra_env.items() %}
+        <div class="env-field full">
+          <label class="env-label" for="f-extra-{{ loop.index0 }}">{{ name|e }}</label>
+          <input id="f-extra-{{ loop.index0 }}" name="{{ name|e }}" value="{{ val|e }}" />
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <div class="actions-row" style="flex-wrap:wrap">
+        <button type="button" class="btn-primary" id="btn-rerun">▶ Launch with these settings</button>
+        <button type="button" class="launch-btn" id="btn-enqueue" style="background:var(--bg3);color:var(--accent);border:1px solid var(--border2)">Add to queue</button>
+        <span id="rerun-msg" style="font-size:12px;color:var(--text2)"></span>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">{% if is_live %}Live output{% else %}Log (tail){% endif %}</div>
+      <div class="log-panel">
+        <div class="log-header">
+          <span class="log-title">stdout / stderr</span>
+          {% if is_live %}<span class="badge running pulse">streaming</span>{% endif %}
+        </div>
+        <div class="log-body" id="log-body" {% if not is_live %}style="max-height:480px"{% endif %}>{% if not is_live %}{{ log_tail|e }}{% endif %}</div>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+const IS_LIVE = {{ 'true' if is_live else 'false' }};
+const RUN_ID = {{ run_id|tojson }};
+
+function gatherEnv() {
+  const env = {};
+  document.querySelectorAll('#rerun-form input[name], #extra-params input[name]').forEach(el => {
+    if (el.name && el.value) env[el.name] = el.value;
+  });
+  return env;
+}
+
+async function launchOrQueue(queue) {
+  const msg = document.getElementById('rerun-msg');
+  const btnRun = document.getElementById('btn-rerun');
+  const btnQ = document.getElementById('btn-enqueue');
+  msg.textContent = '';
+  btnRun.disabled = true;
+  btnQ.disabled = true;
+  try {
+    const res = await fetch('/api/launch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        job_id: document.getElementById('job_id').value,
+        env: gatherEnv(),
+        queue: !!queue,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    if (data.queued) {
+      msg.innerHTML =
+        `Queued (${data.queue_id.slice(0, 8)}…). ~${data.jobs_completed_before_yours_est} job(s) ahead. ` +
+        '<a href="{{ url_for("queue_page") }}" style="color:var(--accent)">Open queue</a>';
+      btnRun.disabled = false;
+      btnQ.disabled = false;
+      return;
+    }
+    window.location.href = '/runs/' + encodeURIComponent(data.run_id);
+  } catch (e) {
+    msg.textContent = 'Error: ' + e.message;
+    btnRun.disabled = false;
+    btnQ.disabled = false;
+  }
+}
+
+document.getElementById('btn-rerun').addEventListener('click', () => launchOrQueue(false));
+document.getElementById('btn-enqueue').addEventListener('click', () => launchOrQueue(true));
+
+if (IS_LIVE) {
+  const logBody = document.getElementById('log-body');
+  const es = new EventSource('/api/runs/' + encodeURIComponent(RUN_ID) + '/logs');
+  es.onmessage = ev => {
+    if (ev.data.startsWith('[FINISHED')) { es.close(); return; }
+    logBody.textContent += ev.data + '\n';
+    logBody.scrollTop = logBody.scrollHeight;
+  };
+  es.onerror = () => es.close();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Running jobs — Job Launcher{% endblock %}
+{% block body %}
+<main class="main" style="grid-column:1/-1;max-width:1200px;margin:0 auto;width:100%">
+  <div class="content">
+    <h1 class="page-title">Currently running</h1>
+    <p class="page-desc">Jobs with status <code>pending</code> or <code>running</code>. Click a run to view parameters, logs, and re-launch.</p>
+    <div class="form-section-title" style="margin-bottom:12px">Active runs</div>
+    <div class="table-wrap">
+      <table class="data-table" id="active-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Job</th>
+            <th>Status</th>
+            <th>Started</th>
+            <th>PID</th>
+            <th>Parameters</th>
+          </tr>
+        </thead>
+        <tbody id="active-body">
+          <tr><td colspan="6" style="color:var(--text3)">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="page-desc" style="margin-top:20px" id="active-empty" hidden>No active jobs.</p>
+  </div>
+</main>
+<script>
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+function fmtEnv(env) {
+  if (!env || typeof env !== 'object') return '';
+  return Object.entries(env).map(([k,v]) => k + '=' + v).join(', ');
+}
+async function load() {
+  const res = await fetch('/api/runs/active');
+  const data = await res.json();
+  const items = data.items || [];
+  const tb = document.getElementById('active-body');
+  const empty = document.getElementById('active-empty');
+  if (!items.length) {
+    tb.innerHTML = '<tr><td colspan="6" style="color:var(--text3)">No active jobs.</td></tr>';
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+  tb.innerHTML = items.map(r => {
+    const envStr = fmtEnv(r.env);
+    const envShort = envStr.length > 120 ? envStr.slice(0, 117) + '…' : envStr;
+    return `<tr>
+      <td><a href="/runs/${encodeURIComponent(r.run_id)}">Open</a></td>
+      <td>${esc(r.job_name)}<div style="font-size:11px;color:var(--text3);margin-top:4px">${esc(r.job_id)}</div></td>
+      <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
+      <td style="font-family:var(--mono);font-size:11px">${esc(r.started_at)}</td>
+      <td style="font-family:var(--mono);font-size:11px">${r.pid != null ? esc(String(r.pid)) : '—'}</td>
+      <td style="font-family:var(--mono);font-size:10px;color:var(--text2);max-width:360px" title="${esc(envStr)}">${esc(envShort)}</td>
+    </tr>`;
+  }).join('');
+}
+load();
+setInterval(load, 4000);
+</script>
+{% endblock %}
