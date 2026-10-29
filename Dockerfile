@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
   && . /etc/os-release \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list \
   && apt-get update \
-  && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+  && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin tzdata \
   && docker --version && docker compose version \
   && rm -rf /var/lib/apt/lists/*
 
@@ -19,6 +19,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+COPY data_runs.py .
 COPY templates/ templates/
 
 EXPOSE 5000

@@ -1,0 +1,842 @@
+{% extends "base.html" %}
+{% block title %}Data runs — Job Launcher{% endblock %}
+{% block extra_head %}
+<style>
+  .filters {
+    display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end;
+    margin-bottom: 12px; padding: 16px; background: var(--bg2); border: 1px solid var(--border); border-radius: 3px;
+  }
+  .roots-banner {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    font-size: 12px; color: var(--text2); margin-bottom: 16px;
+  }
+  @media (max-width: 800px) { .roots-banner { grid-template-columns: 1fr; } }
+  .roots-panel { padding: 12px 14px; border-radius: 3px; line-height: 1.55; background: var(--bg2); border: 1px solid var(--border); }
+  .roots-panel strong {
+    display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; margin-bottom: 6px; color: var(--text2);
+  }
+  .roots-banner code { font-family: var(--mono); font-size: 11px; color: var(--text); word-break: break-all; }
+  .roots-banner .warn { grid-column: 1 / -1; color: var(--warn); padding: 8px 0 0; }
+
+  .summary-cards { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
+  .summary-group {
+    display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 14px; border-radius: 3px; flex: 1; min-width: 260px;
+    background: var(--bg2); border: 1px solid var(--border);
+  }
+  .summary-group-title {
+    width: 100%; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+    text-transform: uppercase; margin-bottom: 4px; color: var(--text2);
+  }
+  .summary-card {
+    background: var(--bg3); border: 1px solid var(--border); border-radius: 3px;
+    padding: 10px 14px; min-width: 80px;
+  }
+  .summary-card .label { font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; }
+  .summary-card .value { font-family: var(--mono); font-size: 18px; color: var(--accent); margin-top: 4px; }
+
+  .col-group {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em;
+    text-transform: uppercase; text-align: center;
+    color: var(--text2); background: var(--bg2);
+  }
+  .col-group-start { border-left: 2px solid var(--border); }
+  td.col-meta, th.col-meta { background: transparent !important; border-left: none !important; }
+  th.col-meta { background: var(--bg2) !important; }
+
+  .stage-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .stage-dot.empty, .stage-dot.centers, .stage-dot.centers_partial { background: #6688aa; }
+  .stage-dot.rays, .stage-dot.rays_partial { background: #aa8844; }
+  .stage-dot.stm, .stage-dot.stm_partial { background: #aa6644; }
+  .stage-dot.tracks_staging, .stage-dot.tracks_staging_partial { background: #aa44aa; }
+  .stage-dot.tracks, .stage-dot.tracks_partial { background: var(--accent); }
+
+  .frac { font-family: var(--mono); font-size: 12px; }
+  .frac.done { color: var(--accent); }
+  .frac.partial { color: var(--warn); }
+  .frac.none { color: var(--text3); }
+  .frac-meta { font-size: 10px; color: var(--text3); margin-top: 3px; }
+
+  .path-hint { font-size: 11px; color: var(--text3); margin-bottom: 16px; }
+  .status-msg { color: var(--text3); padding: 20px 0; }
+  .status-msg.error { color: var(--danger); }
+
+  tr.case-row, tr.run-row { cursor: pointer; }
+  tr.detail-row td { background: var(--bg2); padding: 0; border-bottom: 1px solid var(--border); }
+  .nested-wrap { padding: 14px 18px 18px 24px; }
+  .nested-label {
+    font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 10px;
+  }
+  .detail-split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 1000px) { .detail-split { grid-template-columns: 1fr; } }
+  .detail-zone { border-radius: 3px; padding: 14px; background: var(--bg2); border: 1px solid var(--border); }
+  .detail-zone-title {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--text2);
+  }
+  .detail-block {
+    border: 1px solid var(--border); border-radius: 3px; padding: 12px; background: var(--bg3);
+    margin-bottom: 10px;
+  }
+  .detail-block:last-child { margin-bottom: 0; }
+  .detail-block .block-title { color: var(--accent); font-family: var(--mono); font-size: 11px; margin-bottom: 8px; }
+  .detail-block .file-path { font-size: 10px; color: var(--text3); word-break: break-all; margin-bottom: 8px; }
+  .detail-block .file-meta { font-size: 10px; color: var(--text2); margin-bottom: 8px; }
+  .attr-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+  .attr-table td { padding: 3px 0; vertical-align: top; word-break: break-all; }
+  .attr-table td:first-child { color: var(--text3); padding-right: 12px; white-space: nowrap; width: 1%; }
+  .hint-expand { font-size: 11px; color: var(--text3); margin-top: 8px; }
+
+  .lock-bar, .launch-bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin-bottom: 12px; padding: 10px 12px; background: var(--bg3);
+    border: 1px solid var(--border); border-radius: 3px;
+  }
+  .launch-bar { margin-bottom: 8px; }
+  .lock-bar-label {
+    font-family: var(--mono); font-size: 10px; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.08em; margin-right: 4px;
+  }
+  .btn-lock {
+    background: transparent; color: var(--text2); border: 1px solid var(--border2);
+    padding: 5px 10px; font-family: var(--mono); font-size: 10px; cursor: pointer; border-radius: 2px;
+  }
+  .btn-lock:hover { color: var(--accent); border-color: var(--accent); }
+  .btn-lock.on { color: var(--warn); border-color: #665522; }
+  .btn-lock.on:hover { color: #ffcc66; border-color: #886633; }
+  .btn-lock:disabled { opacity: 0.5; cursor: wait; }
+  .btn-launch, .col-launch {
+    display: inline-block; background: transparent; color: var(--text2);
+    border: 1px solid var(--border2); padding: 5px 10px; font-family: var(--mono);
+    font-size: 10px; cursor: pointer; border-radius: 2px; text-decoration: none;
+    line-height: 1.2;
+  }
+  .btn-launch:hover, .col-launch:hover { color: var(--accent); border-color: var(--accent); }
+  .col-launch { padding: 1px 5px; margin-left: 4px; vertical-align: middle; font-size: 9px; }
+  .block-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .block-title-row .block-title { margin-bottom: 0; }
+  .lock-badge {
+    display: inline-block; margin-left: 8px; font-size: 9px; color: var(--warn);
+    text-transform: uppercase; letter-spacing: 0.06em; vertical-align: middle;
+  }
+  .summary-block-title {
+    font-family: var(--mono); font-size: 10px; color: var(--text2);
+    text-transform: uppercase; letter-spacing: 0.06em; margin: 10px 0 6px;
+  }
+  .summary-block-title:first-child { margin-top: 0; }
+</style>
+{% endblock %}
+{% block body %}
+<main class="main" style="max-width:1400px;margin:0 auto;width:100%">
+  <div class="content">
+    <h1 class="page-title">Case status</h1>
+    <p class="page-desc">All cases for one base path. Click a case for per-run HDF5 metadata, tracking parameters, and step write protection. Use <strong>Launch</strong> or column ↗ links to open the job launcher pre-filled for that step.</p>
+
+    <div id="roots-banner" class="roots-banner">Loading…</div>
+
+    <div class="filters">
+      <div class="env-field">
+        <label class="env-label">Base path</label>
+        <input type="text" id="f-base" placeholder="Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI">
+      </div>
+      <button type="button" class="btn-primary" id="btn-load">Load</button>
+    </div>
+
+    <div class="path-hint" id="path-hint"></div>
+    <div class="path-hint" id="refresh-hint" style="margin-top:-8px"></div>
+    <div class="hint-expand" id="expand-hint"></div>
+    <div class="summary-cards" id="summary-cards" style="display:none"></div>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th rowspan="2" class="col-meta">Case</th>
+            <th rowspan="2" class="col-meta">Stage</th>
+            <th rowspan="2" class="col-meta">Runs</th>
+            <th colspan="2" class="col-group col-group-start">processed_data</th>
+            <th colspan="3" class="col-group col-group-start">data</th>
+          </tr>
+          <tr>
+            <th class="col-processed col-group-start">Centers</th>
+            <th class="col-processed">rays.h5 <a class="col-launch" href="#" data-job="compute_rays" title="Open launcher (compute rays)">↗</a></th>
+            <th class="col-data col-group-start">rays_out_cpp.h5 <a class="col-launch" href="#" data-job="stereo_matching" title="Open launcher (stereo matching)">↗</a></th>
+            <th class="col-data">tracks staging <a class="col-launch" href="#" data-job="graph_tracking" title="Open launcher (graph tracking)">↗</a></th>
+            <th class="col-data">tracks.h5part <a class="col-launch" href="#" data-job="tracking" title="Open launcher (4-frame tracking)">↗</a></th>
+          </tr>
+        </thead>
+        <tbody id="cases-body">
+          <tr><td colspan="8" class="status-msg">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+<script>
+const STAGE_LABELS = {
+  empty: 'Not started',
+  centers: 'Centers',
+  centers_partial: 'Centers (partial)',
+  rays: 'Rays',
+  rays_partial: 'Rays (partial)',
+  stm: 'Stereo matching',
+  stm_partial: 'STM (partial)',
+  tracks_staging: 'Tracks staging',
+  tracks_staging_partial: 'Tracks staging (partial)',
+  tracks: 'Tracks complete',
+  tracks_partial: 'Tracks (partial)',
+};
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+
+function fracCell(n, total) {
+  n = Number(n) || 0;
+  total = Number(total) || 0;
+  if (total === 0) return '<span class="frac none">—</span>';
+  const cls = n === 0 ? 'none' : (n === total ? 'done' : 'partial');
+  return '<span class="frac ' + cls + '">' + esc(String(n)) + '/' + esc(String(total)) + '</span>';
+}
+
+function fracCellWithFrames(n, total, lo, hi) {
+  const html = fracCell(n, total);
+  if (lo == null) return html;
+  const fr = lo === hi ? (lo + ' frames') : (lo + '–' + hi + ' frames');
+  return html + '<div class="frac-meta">' + esc(fr) + '</div>';
+}
+
+function artCell(art) {
+  if (!art?.present) return '<span class="frac none">—</span>';
+  let html = '<span class="frac done">✓</span>';
+  if (art.n_frames != null) {
+    html += '<div class="frac-meta">' + esc(art.n_frames + ' frames') + '</div>';
+  }
+  return html;
+}
+
+const LOCKABLE_ARTIFACTS = [
+  { key: 'rays_h5', label: 'rays.h5' },
+  { key: 'rays_out_cpp_h5', label: 'rays_out_cpp.h5' },
+  { key: 'tracks_staging_h5part', label: 'tracks staging' },
+  { key: 'tracks_h5part', label: 'tracks.h5part' },
+];
+
+function artifactLockStatus(runs, key) {
+  let present = 0, locked = 0;
+  for (const r of runs) {
+    const art = (r.artifacts || {})[key];
+    if (art?.present) {
+      present++;
+      if (art.write_protected) locked++;
+    }
+  }
+  return { present, locked };
+}
+
+function fileLockButton(caseName, runName, artifactKey, art) {
+  if (!art?.present) return '';
+  const protected_ = !!art.write_protected;
+  const label = protected_ ? 'Unlock' : 'Write protect';
+  const cls = protected_ ? 'btn-lock on' : 'btn-lock';
+  return '<button type="button" class="' + cls + '" ' +
+    'data-wp-case="' + esc(caseName) + '" ' +
+    'data-wp-run="' + esc(runName) + '" ' +
+    'data-wp-artifact="' + esc(artifactKey) + '" ' +
+    'data-wp-protect="' + (protected_ ? 'false' : 'true') + '">' + esc(label) + '</button>';
+}
+
+function caseLockButton(caseName, key, label, status) {
+  if (!status.present) return '';
+  const allLocked = status.locked === status.present;
+  const protect = !allLocked;
+  const btnLabel = allLocked
+    ? ('Unlock all ' + label + ' (' + status.present + ')')
+    : ('Write protect all ' + label + ' (' + status.present + ')');
+  const cls = allLocked ? 'btn-lock on' : 'btn-lock';
+  return '<button type="button" class="' + cls + '" ' +
+    'data-wp-case="' + esc(caseName) + '" ' +
+    'data-wp-artifact="' + esc(key) + '" ' +
+    'data-wp-protect="' + (protect ? 'true' : 'false') + '">' + esc(btnLabel) + '</button>';
+}
+
+const LAUNCH_JOBS = [
+  { id: 'compute_rays', label: 'Compute rays' },
+  { id: 'stereo_matching', label: 'Stereo matching' },
+  { id: 'tracking', label: '4-frame tracking' },
+  { id: 'graph_tracking', label: 'Graph tracking' },
+];
+
+function normalizeOverviewBase(base) {
+  let b = (base || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  for (const prefix of ['processed_data/', 'data/']) {
+    if (b.startsWith(prefix)) b = b.slice(prefix.length);
+  }
+  return b;
+}
+
+function launchUrl(jobId, { base, caseName, runs }) {
+  const params = new URLSearchParams();
+  params.set('job', jobId);
+  const rel = normalizeOverviewBase(base);
+  if (rel) params.set('base', rel);
+  if (caseName) params.set('case', caseName);
+  if (runs && runs.length) params.set('runs', runs.join(','));
+  return '/launch?' + params.toString();
+}
+
+function renderCaseLaunchBar(caseData) {
+  const base = document.getElementById('f-base').value.trim();
+  const caseName = caseData.case;
+  const runs = (caseData.runs || []).map(r => r.name);
+  const buttons = LAUNCH_JOBS.map(({ id, label }) =>
+    '<a class="btn-launch" target="_blank" rel="noopener" href="' + esc(launchUrl(id, { base, caseName, runs })) + '">' + esc(label) + '</a>'
+  ).join('');
+  return '<div class="launch-bar">' +
+    '<span class="lock-bar-label">Launch</span>' +
+    buttons +
+    '</div>';
+}
+
+function renderCaseLockBar(caseData) {
+  const runs = caseData.runs || [];
+  const buttons = LOCKABLE_ARTIFACTS.map(({ key, label }) =>
+    caseLockButton(caseData.case, key, label, artifactLockStatus(runs, key))
+  ).filter(Boolean);
+  if (!buttons.length) return '';
+  return '<div class="lock-bar">' +
+    '<span class="lock-bar-label">Step write protection</span>' +
+    buttons.join('') +
+    '</div>';
+}
+
+function fmtBytes(n) {
+  if (n == null || n === '') return '';
+  const b = Number(n);
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(1) + ' MB';
+  return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+
+function renderAttrs(attrs) {
+  if (!attrs || !Object.keys(attrs).length) return '<span style="color:var(--text3)">No root attributes</span>';
+  const rows = Object.entries(attrs).sort(([a],[b]) => a.localeCompare(b))
+    .map(([k,v]) => '<tr><td>' + esc(k) + '</td><td>' + esc(v) + '</td></tr>').join('');
+  return '<table class="attr-table">' + rows + '</table>';
+}
+
+function renderObjTable(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  const rows = Object.entries(obj).sort(([a],[b]) => a.localeCompare(b))
+    .map(([k,v]) => '<tr><td>' + esc(k) + '</td><td>' + esc(typeof v === 'object' ? JSON.stringify(v) : v) + '</td></tr>').join('');
+  return '<table class="attr-table">' + rows + '</table>';
+}
+
+function renderKvTable(rows) {
+  if (!rows.length) return '';
+  const body = rows.map(([k, v]) =>
+    '<tr><td>' + esc(k) + '</td><td>' + esc(String(v)) + '</td></tr>'
+  ).join('');
+  return '<table class="attr-table">' + body + '</table>';
+}
+
+const H5_SUMMARY_SECTIONS = {
+  rays_out_cpp: [
+    {
+      title: 'STM parameters',
+      rows: (s) => [
+        ['Min cameras', s.stm_mincameras],
+        ['Max distance', s.stm_maxdistance],
+        ['Max matches per ray', s.stm_maxmatchesperray],
+        ['Multiple matches / ray dist', s.stm_multiple_matches_per_ray_distance],
+        ['Search box (voxels)', s.stm_box_voxels],
+        ['Bounding box', s.stm_bounding_box],
+        ['Spatial boxes', s.stm_spatial_boxes],
+        ['Spatial overlap cells', s.stm_spatial_overlap_cells],
+        ['Frame parallelism', s.stm_frame_parallelism],
+        ['Threads', s.stm_threads],
+        ['Timing enabled', s.stm_timing],
+        ['Max frames requested', s.stm_max_frames_requested],
+      ],
+    },
+    {
+      title: 'Matches per frame',
+      rows: (s) => [
+        ['Min', s.matches_per_frame_min],
+        ['Max', s.matches_per_frame_max],
+        ['Mean', s.matches_per_frame_mean],
+        ['Total (all frames)', s.matches_total],
+      ],
+    },
+    {
+      title: 'Frame datasets',
+      rows: (s) => (s.frame_datasets || []).length
+        ? [['Datasets', (s.frame_datasets || []).join(', ')]]
+        : [],
+    },
+  ],
+  tracks: [
+    {
+      title: 'Tracking parameters',
+      rows: (s) => [
+        ['Tracker', s.tracker || s.job_id],
+        ['Case / run', s.run_case && s.run_name ? (s.run_case + ' / ' + s.run_name) : (s.run_case || s.run_name)],
+        ['dt', s.dt_s != null ? s.dt_s + ' s' : null],
+        ['Rep rate', s.rep_rate_hz != null ? s.rep_rate_hz + ' Hz' : null],
+        ['Track length (frames)', s.track_length],
+        ['Box size track', s.box_size_track],
+        ['Box initial X lo/hi', s.box_size_initial_x_lo != null ? (s.box_size_initial_x_lo + ' / ' + s.box_size_initial_x_hi) : null],
+        ['Box size Y / Z', s.box_size_y != null ? (s.box_size_y + ' / ' + s.box_size_z) : null],
+        ['Workers', s.workers],
+        ['Max branch', s.max_branch],
+        ['Bidirectional graph', s.use_bidirectional_graph],
+        ['Position units', s.position_units],
+        ['Time units', s.time_units],
+        ['Velocity units', s.velocity_units],
+        ['Acceleration units', s.acceleration_units],
+      ],
+    },
+    {
+      title: 'Particles per step',
+      rows: (s) => [
+        ['Min', s.particles_per_step_min],
+        ['Max', s.particles_per_step_max],
+        ['Mean', s.particles_per_step_mean],
+        ['Mean tracked (id > 0)', s.tracked_particles_per_step_mean],
+        ['Unique track IDs', s.n_unique_track_ids],
+      ],
+    },
+    {
+      title: 'Time span',
+      rows: (s) => [
+        ['Start', s.time_min_s != null ? s.time_min_s + ' s' : null],
+        ['End', s.time_max_s != null ? s.time_max_s + ' s' : null],
+      ],
+    },
+    {
+      title: 'Step datasets',
+      rows: (s) => (s.step_datasets || []).length
+        ? [['Datasets', (s.step_datasets || []).join(', ')]]
+        : [],
+    },
+  ],
+};
+
+function renderH5Summary(summary) {
+  if (!summary || !summary.file_kind) return '';
+  const sections = H5_SUMMARY_SECTIONS[summary.file_kind] || [];
+  return sections.map(sec => {
+    const rows = sec.rows(summary).filter(([, v]) => v != null && v !== '');
+    if (!rows.length) return '';
+    return '<div class="summary-block-title">' + esc(sec.title) + '</div>' + renderKvTable(rows);
+  }).join('');
+}
+
+function h5Block(art, label, caseName, runName, artifactKey) {
+  if (!art || !art.present) return '';
+  const parts = [];
+  if (art.n_frames != null) parts.push(art.n_frames + ' frames');
+  if (art.n_top_level_keys != null) parts.push(art.n_top_level_keys + ' top-level keys');
+  if (art.size_bytes != null) parts.push(fmtBytes(art.size_bytes));
+  if (art.modified_at) parts.push('modified ' + art.modified_at);
+  const lockBadge = art.write_protected ? '<span class="lock-badge">write protected</span>' : '';
+  const summaryHtml = renderH5Summary(art.summary);
+  const attrsHtml = art.attrs && Object.keys(art.attrs).length
+    ? ('<div class="summary-block-title">Root attributes</div>' + renderAttrs(art.attrs))
+    : '';
+  return '<div class="detail-block">' +
+    '<div class="block-title-row">' +
+    '<div class="block-title">' + esc(label || art.filename || 'HDF5') + lockBadge + '</div>' +
+    fileLockButton(caseName, runName, artifactKey, art) +
+    '</div>' +
+    (art.path ? '<div class="file-path">' + esc(art.path) + '</div>' : '') +
+    (parts.length ? '<div class="file-meta">' + esc(parts.join(' · ')) + '</div>' : '') +
+    (art.error ? '<div class="file-meta" style="color:var(--danger)">' + esc(art.error) + '</div>' : '') +
+    summaryHtml +
+    attrsHtml +
+    '</div>';
+}
+
+function renderRunDetail(run, caseName) {
+  const arts = run.artifacts || {};
+  const processedBlocks = [];
+  if (run.centers) {
+    processedBlocks.push('<div class="detail-block"><div class="block-title">Centers</div>' +
+      (run.processed_dir ? '<div class="file-path">' + esc(run.processed_dir) + '</div>' : '') +
+      '<span style="color:var(--accent);font-family:var(--mono);font-size:11px">present</span></div>');
+  }
+  processedBlocks.push(h5Block(arts.rays_h5, 'rays.h5', caseName, run.name, 'rays_h5'));
+
+  const dataBlocks = [];
+  dataBlocks.push(h5Block(arts.rays_out_cpp_h5, 'rays_out_cpp.h5', caseName, run.name, 'rays_out_cpp_h5'));
+  dataBlocks.push(h5Block(arts.tracks_staging_h5part, arts.tracks_staging_h5part?.filename || 'tracks staging', caseName, run.name, 'tracks_staging_h5part'));
+  dataBlocks.push(h5Block(arts.tracks_h5part, 'tracks.h5part', caseName, run.name, 'tracks_h5part'));
+
+  const sj = run.staging_json;
+  if (sj && Object.keys(sj).length) {
+    dataBlocks.push('<div class="detail-block"><div class="block-title">staging JSON</div>' +
+      renderObjTable(sj) + '</div>');
+  }
+
+  const zone = (title, blocks) => {
+    const content = blocks.filter(Boolean);
+    return '<div class="detail-zone"><div class="detail-zone-title">' + title + '</div>' +
+      (content.length ? content.join('') : '<span style="color:var(--text3)">—</span>') +
+      '</div>';
+  };
+
+  return '<div class="detail-split">' +
+    zone('processed_data', processedBlocks) +
+    zone('data', dataBlocks) +
+    '</div>';
+}
+
+function renderRunsDetailTable(caseData) {
+  const runs = caseData.runs || [];
+  if (!runs.length) return '<div class="nested-wrap"><span style="color:var(--text3)">No runs.</span></div>';
+
+  const rows = runs.map(r => {
+    const stage = r.stage || 'empty';
+    const runKey = caseData.case + '::' + r.name;
+    const arts = r.artifacts || {};
+    return `
+      <tr class="run-row" data-run-key="${esc(runKey)}">
+        <td class="col-meta" style="font-family:var(--mono);font-weight:500">${esc(r.name)}</td>
+        <td class="col-meta"><span class="stage-dot ${esc(stage)}"></span>${esc(STAGE_LABELS[stage] || stage)}</td>
+        <td class="col-processed col-group-start">${r.centers ? '<span class="frac done">✓</span>' : '<span class="frac none">—</span>'}</td>
+        <td class="col-processed">${artCell(arts.rays_h5)}</td>
+        <td class="col-data col-group-start">${artCell(arts.rays_out_cpp_h5)}</td>
+        <td class="col-data">${arts.tracks_staging_h5part?.present ? '<span class="frac done">✓</span>' : '<span class="frac none">—</span>'}</td>
+        <td class="col-data">${artCell(arts.tracks_h5part)}</td>
+      </tr>
+      <tr class="run-detail-row" data-run-detail="${esc(runKey)}" style="display:none">
+        <td colspan="7"><div class="nested-wrap" style="padding-top:0">${renderRunDetail(r, caseData.case)}</div></td>
+      </tr>`;
+  }).join('');
+
+  return `<div class="nested-wrap">
+    <div class="nested-label">${esc(caseData.case)} — click a run for HDF5 metadata</div>
+    ${renderCaseLaunchBar(caseData)}
+    ${renderCaseLockBar(caseData)}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="col-meta">Run</th><th class="col-meta">Stage</th>
+            <th class="col-processed col-group-start">Centers</th><th class="col-processed">rays.h5</th>
+            <th class="col-data col-group-start">rays_out_cpp</th><th class="col-data">staging</th><th class="col-data">tracks</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+let expandedCase = null;
+let expandedRun = null;
+let caseDetailCache = {};
+let overviewLoadInFlight = false;
+
+function showRunDetail(container, runKey) {
+  if (!container || !runKey) return;
+  container.querySelectorAll('.run-detail-row').forEach(el => { el.style.display = 'none'; });
+  const detail = container.querySelector('[data-run-detail="' + runKey + '"]');
+  if (detail) {
+    detail.style.display = '';
+    expandedRun = runKey;
+  }
+}
+
+async function openCaseDetail(caseName, detailRow, opts = {}) {
+  const base = document.getElementById('f-base').value.trim();
+  const restoreRun = opts.runKey || null;
+  expandedCase = caseName;
+  document.querySelectorAll('.case-detail-row').forEach(el => {
+    if (el !== detailRow) el.style.display = 'none';
+  });
+  detailRow.style.display = '';
+  const cacheKey = base + '::' + caseName;
+  const cached = caseDetailCache[cacheKey];
+  if (cached && !opts.forceReload) {
+    detailRow.querySelector('td').innerHTML = renderRunsDetailTable(cached);
+    bindRunRows(detailRow);
+    bindWriteProtectButtons(detailRow);
+    if (restoreRun) showRunDetail(detailRow, restoreRun);
+    else expandedRun = null;
+    return;
+  }
+  detailRow.querySelector('td').innerHTML = '<div class="nested-wrap"><span class="status-msg">Loading HDF5 metadata…</span></div>';
+  try {
+    const data = await loadCaseDetail(caseName, base);
+    detailRow.querySelector('td').innerHTML = renderRunsDetailTable(data);
+    bindRunRows(detailRow);
+    bindWriteProtectButtons(detailRow);
+    if (restoreRun) showRunDetail(detailRow, restoreRun);
+    else expandedRun = null;
+  } catch (e) {
+    detailRow.querySelector('td').innerHTML = '<div class="nested-wrap"><span class="status-msg error">' + esc(e.message) + '</span></div>';
+  }
+}
+
+function bindRunRows(container) {
+  container.querySelectorAll('.run-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = row.getAttribute('data-run-key');
+      const detail = container.querySelector('[data-run-detail="' + key + '"]');
+      if (!detail) return;
+      const show = expandedRun !== key;
+      container.querySelectorAll('.run-detail-row').forEach(el => { el.style.display = 'none'; });
+      expandedRun = show ? key : null;
+      if (show) detail.style.display = '';
+    });
+  });
+}
+
+function bindWriteProtectButtons(container) {
+  container.querySelectorAll('.btn-lock').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleWriteProtectClick(btn);
+    });
+  });
+}
+
+async function handleWriteProtectClick(btn) {
+  const base = document.getElementById('f-base').value.trim();
+  const caseName = btn.getAttribute('data-wp-case');
+  const run = btn.getAttribute('data-wp-run') || null;
+  const artifact = btn.getAttribute('data-wp-artifact');
+  const protect = btn.getAttribute('data-wp-protect') === 'true';
+  const artLabel = (LOCKABLE_ARTIFACTS.find(a => a.key === artifact) || {}).label || artifact;
+  const scope = run ? ('run ' + run) : ('all runs in ' + caseName);
+  const verb = protect ? 'Write protect' : 'Unlock';
+  if (!confirm(verb + ' ' + artLabel + ' for ' + scope + '?')) return;
+
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/data/write-protect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base, case: caseName, run: run || undefined, artifact, write_protect: protect }),
+    });
+    const data = await res.json();
+    if (!res.ok && res.status !== 207) throw new Error(data.error || 'Write protect failed');
+    await refreshCaseDetail(caseName);
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function refreshCaseDetail(caseName) {
+  const base = document.getElementById('f-base').value.trim();
+  const detailRow = document.querySelector('[data-case-detail="' + caseName + '"]');
+  if (!detailRow || detailRow.style.display === 'none') return;
+  const prevRun = expandedRun;
+  try {
+    delete caseDetailCache[base + '::' + caseName];
+    const data = await loadCaseDetail(caseName, base);
+    detailRow.querySelector('td').innerHTML = renderRunsDetailTable(data);
+    bindRunRows(detailRow);
+    bindWriteProtectButtons(detailRow);
+    if (prevRun) {
+      const detail = detailRow.querySelector('[data-run-detail="' + prevRun + '"]');
+      if (detail) detail.style.display = '';
+      expandedRun = prevRun;
+    }
+  } catch (e) {
+    detailRow.querySelector('td').innerHTML =
+      '<div class="nested-wrap"><span class="status-msg error">' + esc(e.message) + '</span></div>';
+  }
+}
+
+async function loadCaseDetail(caseName, base) {
+  const cacheKey = base + '::' + caseName;
+  const params = new URLSearchParams({ base, _: String(Date.now()) });
+  const res = await fetch('/api/data/cases/' + encodeURIComponent(caseName) + '?' + params, { cache: 'no-store' });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load case detail');
+  caseDetailCache[cacheKey] = data;
+  return data;
+}
+
+async function toggleCaseDetail(caseName, detailRow) {
+  if (expandedCase === caseName) {
+    expandedCase = null;
+    expandedRun = null;
+    detailRow.style.display = 'none';
+    return;
+  }
+  await openCaseDetail(caseName, detailRow);
+}
+
+function renderCasesTable(data) {
+  const tb = document.getElementById('cases-body');
+  const cases = data.cases || [];
+
+  if (!cases.length) {
+    tb.innerHTML = '<tr><td colspan="8" class="status-msg">No cases found under this base path.</td></tr>';
+    return;
+  }
+  tb.innerHTML = cases.map(c => {
+    const s = c.summary || {};
+    const stage = s.stage || 'empty';
+    return `
+      <tr class="case-row" data-case="${esc(c.name)}">
+        <td class="col-meta" style="font-family:var(--mono);font-weight:500">${esc(c.name)}</td>
+        <td class="col-meta"><span class="stage-dot ${esc(stage)}"></span>${esc(STAGE_LABELS[stage] || stage)}</td>
+        <td class="col-meta"><span class="frac">${esc(String(s.total_runs ?? 0))}</span></td>
+        <td class="col-processed col-group-start">${fracCell(s.with_centers, s.total_runs)}</td>
+        <td class="col-processed">${fracCellWithFrames(s.with_rays, s.total_runs, s.rays_frames_min, s.rays_frames_max)}</td>
+        <td class="col-data col-group-start">${fracCellWithFrames(s.with_stm, s.total_runs, s.stm_frames_min, s.stm_frames_max)}</td>
+        <td class="col-data">${fracCell(s.with_tracks_staging, s.total_runs)}</td>
+        <td class="col-data">${fracCellWithFrames(s.with_tracks, s.total_runs, s.tracks_frames_min, s.tracks_frames_max)}</td>
+      </tr>
+      <tr class="case-detail-row" data-case-detail="${esc(c.name)}" style="display:none">
+        <td colspan="8"></td>
+      </tr>`;
+  }).join('');
+
+  tb.querySelectorAll('.case-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const name = row.getAttribute('data-case');
+      const detail = tb.querySelector('[data-case-detail="' + name + '"]');
+      if (detail) toggleCaseDetail(name, detail);
+    });
+  });
+
+  const hint = document.getElementById('expand-hint');
+  if (hint) hint.textContent = 'Click a case row to load runs. Use Launch to open the job launcher with this case pre-filled, or ↗ in a column header for base path only.';
+}
+
+function bindLaunchHeaderLinks() {
+  document.querySelectorAll('.col-launch').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const base = document.getElementById('f-base').value.trim();
+      if (!base) {
+        alert('Set a base path first.');
+        return;
+      }
+      window.open(launchUrl(a.getAttribute('data-job'), { base }), '_blank', 'noopener');
+    });
+  });
+}
+
+function renderSummary(summary) {
+  const el = document.getElementById('summary-cards');
+  if (!summary) { el.style.display = 'none'; return; }
+  const card = (label, val) =>
+    '<div class="summary-card"><div class="label">' + esc(label) + '</div><div class="value">' + esc(String(val)) + '</div></div>';
+  el.innerHTML =
+    '<div class="summary-group">' +
+    '<div class="summary-group-title">processed_data — totals across all cases</div>' +
+    card('Cases', summary.total_cases) +
+    card('Runs', summary.total_runs) +
+    card('Centers', summary.with_centers) +
+    card('rays.h5', summary.with_rays) +
+    '</div>' +
+    '<div class="summary-group">' +
+    '<div class="summary-group-title">data — totals across all cases</div>' +
+    card('rays_out_cpp.h5', summary.with_stm) +
+    card('tracks staging', summary.with_tracks_staging) +
+    card('tracks.h5part', summary.with_tracks) +
+    '</div>';
+  el.style.display = 'flex';
+}
+
+function renderRootsBanner(cfg, data) {
+  const el = document.getElementById('roots-banner');
+  const warns = [];
+  if (!cfg.processed_root_exists) warns.push('processed_data root not found');
+  if (!cfg.data_root_exists) warns.push('data root not found');
+  if (data && !data.processed_base_exists) warns.push('processed base missing');
+  if (data && !data.data_base_exists) warns.push('data base missing');
+  el.innerHTML =
+    '<div class="roots-panel"><strong>processed_data</strong><code>' + esc(cfg.processed_root) + '</code></div>' +
+    '<div class="roots-panel"><strong>data</strong><code>' + esc(cfg.data_root) + '</code></div>' +
+    (warns.length ? '<div class="warn">' + esc(warns.join(' · ')) + '</div>' : '');
+}
+
+async function loadOverview(opts = {}) {
+  const silent = opts.silent === true;
+  if (overviewLoadInFlight) {
+    if (silent) return;
+  }
+  overviewLoadInFlight = true;
+
+  const tb = document.getElementById('cases-body');
+  const prevCase = expandedCase;
+  const prevRun = expandedRun;
+
+  if (!silent) {
+    tb.innerHTML = '<tr><td colspan="8" class="status-msg">Loading…</td></tr>';
+    document.getElementById('summary-cards').style.display = 'none';
+    expandedCase = null;
+    expandedRun = null;
+    caseDetailCache = {};
+  }
+
+  try {
+    const base = document.getElementById('f-base').value.trim();
+    const params = new URLSearchParams({ base, _: String(Date.now()) });
+    const res = await fetch('/api/data/overview?' + params, { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok) {
+      if (!silent) {
+        tb.innerHTML = '<tr><td colspan="8" class="status-msg error">' + esc(data.error || 'Load failed') + '</td></tr>';
+      }
+      return;
+    }
+
+    const cfg = await fetch('/api/data/defaults?_=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
+    renderRootsBanner(cfg, data);
+    document.getElementById('path-hint').textContent = 'Base path: ' + (data.base || '—');
+    document.getElementById('refresh-hint').textContent =
+      'Last refreshed: ' + (data.generated_at || new Date().toLocaleString()) +
+      ' · auto-refresh every 30s' + (silent && prevCase ? ' (expanded rows kept open)' : '');
+    renderSummary(data.summary);
+    renderCasesTable(data);
+
+    if (prevCase) {
+      const detail = document.querySelector('[data-case-detail="' + prevCase + '"]');
+      if (detail) {
+        await openCaseDetail(prevCase, detail, { runKey: prevRun, forceReload: false });
+      }
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('base', base);
+    history.replaceState(null, '', url);
+  } finally {
+    overviewLoadInFlight = false;
+  }
+}
+
+async function init() {
+  try {
+    const cfg = await fetch('/api/data/defaults?_=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
+    const urlBase = new URLSearchParams(window.location.search).get('base');
+    document.getElementById('f-base').value = urlBase || cfg.default_base || '';
+    await loadOverview();
+    bindLaunchHeaderLinks();
+    setInterval(() => loadOverview({ silent: true }), 30000);
+  } catch (e) {
+    document.getElementById('cases-body').innerHTML =
+      '<tr><td colspan="8" class="status-msg error">' + esc(e.message) + '</td></tr>';
+  }
+}
+
+document.getElementById('btn-load').addEventListener('click', () => loadOverview());
+document.getElementById('f-base').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); loadOverview(); }
+});
+init();
+</script>
+{% endblock %}

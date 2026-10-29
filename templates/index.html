@@ -43,6 +43,7 @@ const JOBS = {{ jobs | tojson }};
 let currentJobId = JOBS[0]?.id || null;
 let logSource = null;
 let allRuns = {};
+let currentRunId = null;
 
 function _esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
@@ -54,6 +55,241 @@ function selectJob(jobId) {
     el.classList.toggle('active', el.dataset.jobId === jobId);
   });
   renderJobView();
+}
+
+function normalizeOverviewBase(base) {
+  let b = (base || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  for (const prefix of ['processed_data/', 'data/']) {
+    if (b.startsWith(prefix)) b = b.slice(prefix.length);
+  }
+  return b;
+}
+
+function setEnvField(name, value) {
+  if (value == null) return;
+  const el = document.getElementById('env-' + name);
+  if (!el) return;
+  if (el.type === 'checkbox') {
+    el.checked = ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+  } else {
+    el.value = value;
+  }
+}
+
+function prefillLauncherFromQuery(params) {
+  const jobId = params.get('job');
+  const relBase = normalizeOverviewBase(params.get('base') || '');
+  const caseName = params.get('case') || '';
+  const runs = params.get('runs') || '';
+
+  if (caseName) setEnvField('CASE', caseName);
+  if (runs) setEnvField('RUNS', runs);
+  if (!relBase) return;
+
+  const dataBase = 'data/' + relBase;
+  if (jobId === 'compute_rays') {
+    setEnvField('OUTPUT_BASE', dataBase);
+    setEnvField('INPUT_BASE', '');
+  } else if (jobId === 'stereo_matching') {
+    setEnvField('INPUT_BASE', relBase);
+    setEnvField('OUTPUT_BASE', dataBase);
+  } else if (jobId === 'tracking' || jobId === 'graph_tracking') {
+    setEnvField('OUTPUT_BASE', dataBase);
+    setEnvField('INPUT_BASE', '');
+  }
+}
+
+function initLauncherPage() {
+  const params = new URLSearchParams(window.location.search);
+  const jobId = params.get('job');
+  if (jobId && JOBS.some(j => j.id === jobId)) {
+    currentJobId = jobId;
+    document.querySelectorAll('.job-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.jobId === jobId);
+    });
+  }
+  renderJobView();
+  if (jobId) prefillLauncherFromQuery(params);
+}
+
+function renderEnvField(e) {
+  const full = ['INPUT_DIR','INPUT_BASE','OUTPUT_DIR','OUTPUT_BASE','BOUNDING_BOX','NVOXELS'].includes(e.name);
+  const type = e.type || 'text';
+
+  if (type === 'per_camera_select') {
+    const n = e.cameras || 4;
+    const options = e.options || ['TH1', 'TH2'];
+    const def = String(e.default || options[0] || 'TH1');
+    const cells = [];
+    for (let i = 1; i <= n; i++) {
+      const id = `env-${e.name}-cam${i}`;
+      const thClass = def === 'TH2' ? 'is-th2' : 'is-th1';
+      cells.push(`
+        <div class="camera-th-card ${thClass}" id="card-${_esc(e.name)}-cam${i}" data-camera-card="${i}">
+          <div class="camera-th-card-head">
+            <span class="camera-th-name">Camera ${i}</span>
+            <span class="camera-th-badge" id="badge-${_esc(e.name)}-cam${i}">${_esc(def)}</span>
+          </div>
+          <div class="camera-th-folder" id="folder-${_esc(e.name)}-cam${i}">→ Centers_${_esc(def)}/</div>
+          <label class="env-label" for="${id}" style="margin-top:2px">
+            Change threshold
+            <span class="env-var-name">${_esc(e.name)}[${i - 1}]</span>
+          </label>
+          <select id="${id}" name="${_esc(e.name)}-cam${i}" data-threshold-field="${_esc(e.name)}" data-threshold-index="${i - 1}" data-camera-num="${i}">
+            ${options.map(opt => `<option value="${_esc(opt)}"${opt === def ? ' selected' : ''}>${_esc(opt)} — Centers_${_esc(opt)}</option>`).join('')}
+          </select>
+        </div>
+      `);
+    }
+    const setAllBtns = options.map(opt => `
+      <button type="button" class="per-camera-btn" data-set-all-threshold="${_esc(e.name)}" data-th-value="${_esc(opt)}">
+        All cameras → ${_esc(opt)}
+      </button>
+    `).join('');
+    const mapItems = Array.from({ length: n }, (_, idx) => `
+      <div class="per-camera-map-item" id="map-${_esc(e.name)}-cam${idx + 1}">
+        <span class="cam-label">Cam ${idx + 1}</span>
+        <span class="cam-arrow">→</span>
+        <span class="cam-th" data-map-th="${idx + 1}">${_esc(def)}</span>
+      </div>
+    `).join('');
+    return `
+      <div class="env-field full">
+        <div class="per-camera-panel">
+          <div>
+            <div class="per-camera-panel-title">${_esc(e.label)}</div>
+            <div class="per-camera-panel-sub">
+              Each camera below shows its assigned threshold. Pick <strong>TH1</strong> (low) or <strong>TH2</strong> (high) independently.
+            </div>
+            ${e.help ? `<div class="env-field-help prominent">${_esc(e.help)}</div>` : ''}
+          </div>
+          <div class="per-camera-actions">
+            <span class="per-camera-actions-label">Quick set</span>
+            ${setAllBtns}
+          </div>
+          <div class="per-camera-grid">${cells.join('')}</div>
+          <div class="per-camera-preview" id="preview-${_esc(e.name)}">
+            <div class="per-camera-preview-title">Assignment summary</div>
+            <div class="per-camera-map" data-threshold-map="${_esc(e.name)}">${mapItems}</div>
+            <div style="margin-top:10px">
+              Env string <strong>${_esc(e.name)}</strong>:
+              <span data-threshold-preview="${_esc(e.name)}">${Array(n).fill(def).join(',')}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (type === 'select') {
+    const options = e.options || [];
+    const def = String(e.default ?? (options[0] && (options[0].value ?? options[0])) ?? '');
+    const id = `env-${e.name}`;
+    const optsHtml = options.map(opt => {
+      const val = (typeof opt === 'object' && opt !== null) ? opt.value : opt;
+      const label = (typeof opt === 'object' && opt !== null) ? opt.label : opt;
+      return `<option value="${_esc(val)}"${String(val) === def ? ' selected' : ''}>${_esc(label)}</option>`;
+    }).join('');
+    return `
+      <div class="env-field${full ? ' full' : ''}">
+        <label class="env-label" for="${id}">
+          ${_esc(e.label)}
+          <span class="env-var-name">${_esc(e.name)}</span>
+        </label>
+        <select id="${id}" name="${_esc(e.name)}">${optsHtml}</select>
+        ${e.help ? `<div class="env-field-help">${_esc(e.help)}</div>` : ''}
+      </div>
+    `;
+  }
+
+  if (type === 'checkbox') {
+    const checked = e.default === true || String(e.default).toLowerCase() === 'true' || e.default === '1';
+    const id = `env-${e.name}`;
+    return `
+      <div class="env-field full">
+        <div class="checkbox-row">
+          <input type="checkbox" id="${id}" name="${_esc(e.name)}" ${checked ? 'checked' : ''} />
+          <label for="${id}">
+            ${_esc(e.label)}
+            <span class="env-var-name">${_esc(e.name)}</span>
+          </label>
+        </div>
+        ${e.help ? `<div class="env-field-help">${_esc(e.help)}</div>` : ''}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="env-field${full ? ' full' : ''}">
+      <label class="env-label">
+        ${e.required ? '<span class="required-dot"></span>' : ''}
+        ${_esc(e.label)}
+        <span class="env-var-name">${_esc(e.name)}</span>
+      </label>
+      <input
+        id="env-${_esc(e.name)}"
+        name="${_esc(e.name)}"
+        value="${_esc(e.default || '')}"
+        placeholder="${_esc(e.placeholder || '')}"
+        data-required="${e.required || false}"
+      />
+      ${e.help ? `<div class="env-field-help">${_esc(e.help)}</div>` : ''}
+    </div>
+  `;
+}
+
+function readPerCameraThreshold(fieldName, n) {
+  const parts = [];
+  for (let i = 1; i <= n; i++) {
+    const el = document.getElementById(`env-${fieldName}-cam${i}`);
+    parts.push(el ? el.value : 'TH1');
+  }
+  return parts.join(',');
+}
+
+function syncCameraThCard(fieldName, camNum) {
+  const sel = document.getElementById(`env-${fieldName}-cam${camNum}`);
+  if (!sel) return;
+  const th = sel.value || 'TH1';
+  const card = document.getElementById(`card-${fieldName}-cam${camNum}`);
+  const badge = document.getElementById(`badge-${fieldName}-cam${camNum}`);
+  const folder = document.getElementById(`folder-${fieldName}-cam${camNum}`);
+  const mapTh = document.querySelector(`#map-${fieldName}-cam${camNum} .cam-th`);
+  if (card) {
+    card.classList.remove('is-th1', 'is-th2');
+    card.classList.add(th === 'TH2' ? 'is-th2' : 'is-th1');
+  }
+  if (badge) badge.textContent = th;
+  if (folder) folder.textContent = `→ Centers_${th}/`;
+  if (mapTh) mapTh.textContent = th;
+}
+
+function updatePerCameraPreview(fieldName, n) {
+  for (let i = 1; i <= n; i++) syncCameraThCard(fieldName, i);
+  const span = document.querySelector(`[data-threshold-preview="${fieldName}"]`);
+  if (span) span.textContent = readPerCameraThreshold(fieldName, n);
+}
+
+function initPerCameraFields(job) {
+  (job.env || []).forEach(e => {
+    if ((e.type || 'text') !== 'per_camera_select') return;
+    const n = e.cameras || 4;
+    for (let i = 1; i <= n; i++) {
+      const el = document.getElementById(`env-${e.name}-cam${i}`);
+      if (el) el.addEventListener('change', () => updatePerCameraPreview(e.name, n));
+    }
+    document.querySelectorAll(`[data-set-all-threshold="${e.name}"]`).forEach(btn => {
+      btn.addEventListener('click', () => {
+        const val = btn.getAttribute('data-th-value');
+        for (let i = 1; i <= n; i++) {
+          const el = document.getElementById(`env-${e.name}-cam${i}`);
+          if (el) el.value = val;
+        }
+        updatePerCameraPreview(e.name, n);
+      });
+    });
+    updatePerCameraPreview(e.name, n);
+  });
 }
 
 function renderJobView() {
@@ -78,22 +314,7 @@ function renderJobView() {
       <div class="form-section">
         <div class="form-section-title">Environment Variables</div>
         <div class="env-grid" id="env-grid">
-          ${(job.env || []).map(e => `
-            <div class="env-field${['OUTPUT_DIR','OUTPUT_BASE','BOUNDING_BOX','NVOXELS'].includes(e.name) ? ' full' : ''}">
-              <label class="env-label">
-                ${e.required ? '<span class="required-dot"></span>' : ''}
-                ${_esc(e.label)}
-                <span class="env-var-name">${_esc(e.name)}</span>
-              </label>
-              <input
-                id="env-${_esc(e.name)}"
-                name="${_esc(e.name)}"
-                value="${_esc(e.default || '')}"
-                placeholder="${_esc(e.placeholder || '')}"
-                data-required="${e.required || false}"
-              />
-            </div>
-          `).join('')}
+          ${(job.env || []).map(e => renderEnvField(e)).join('')}
         </div>
       </div>
 
@@ -105,6 +326,7 @@ function renderJobView() {
               <span id="log-badge" class="badge pending">idle</span>
               <span id="log-run-id" style="color:var(--text3);font-size:10px;"></span>
             </span>
+            <button type="button" class="btn-danger" id="stop-run-btn" onclick="stopCurrentRun()" hidden>Stop</button>
             <button class="log-clear" onclick="clearLog()">clear</button>
           </div>
           <div class="log-body" id="log-body"></div>
@@ -112,12 +334,34 @@ function renderJobView() {
       </div>
     </div>
   `;
+  initPerCameraFields(job);
 }
 
 function getEnvVars() {
   const job = JOBS.find(j => j.id === currentJobId);
   const env = {};
   (job.env || []).forEach(e => {
+    const type = e.type || 'text';
+    if (type === 'per_camera_select') {
+      const n = e.cameras || 4;
+      const parts = [];
+      for (let i = 1; i <= n; i++) {
+        const el = document.getElementById(`env-${e.name}-cam${i}`);
+        parts.push(el ? el.value : (e.default || 'TH1'));
+      }
+      env[e.name] = parts.join(',');
+      return;
+    }
+    if (type === 'select') {
+      const el = document.getElementById('env-' + e.name);
+      if (el && el.value) env[e.name] = el.value;
+      return;
+    }
+    if (type === 'checkbox') {
+      const el = document.getElementById('env-' + e.name);
+      if (el && el.checked) env[e.name] = '1';
+      return;
+    }
     const el = document.getElementById('env-' + e.name);
     const val = el ? el.value : '';
     if (val) env[e.name] = val;
@@ -125,8 +369,34 @@ function getEnvVars() {
   return env;
 }
 
+async function stopCurrentRun() {
+  if (!currentRunId) return;
+  if (!confirm('Stop this run? Docker child processes will be terminated.')) return;
+  const stopBtn = document.getElementById('stop-run-btn');
+  if (stopBtn) stopBtn.disabled = true;
+  try {
+    const res = await fetch('/api/runs/' + encodeURIComponent(currentRunId) + '/stop', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Stop failed');
+    appendLog('[stop] ' + (data.message || 'Stop requested'));
+  } catch (e) {
+    alert(e.message);
+    if (stopBtn) stopBtn.disabled = false;
+  }
+}
+
+function setStopVisible(show) {
+  const stopBtn = document.getElementById('stop-run-btn');
+  if (stopBtn) {
+    stopBtn.hidden = !show;
+    stopBtn.disabled = false;
+  }
+}
+
 async function launchJob() {
   if (logSource) { logSource.close(); logSource = null; }
+  currentRunId = null;
+  setStopVisible(false);
 
   const btn = document.getElementById('launch-btn');
   btn.disabled = true;
@@ -159,9 +429,11 @@ async function launchJob() {
       return;
     }
 
+    currentRunId = data.run_id;
     document.getElementById('log-run-id').textContent = data.run_id.slice(0, 8);
     setLogBadge('running', 'running');
     btn.textContent = '⏳ Running...';
+    setStopVisible(true);
     streamLogs(data.run_id);
     pollStatus(data.run_id);
     refreshRuns();
@@ -214,7 +486,13 @@ async function pollStatus(runId) {
   }
   const btn = document.getElementById('launch-btn');
   if (btn) { btn.disabled = false; btn.textContent = '▶ Launch'; }
-  setLogBadge(data.status, data.status === 'done' ? `done · ${data.duration}s` : `failed · exit ${data.exit_code}`);
+  setStopVisible(false);
+  currentRunId = null;
+  let badgeText;
+  if (data.status === 'done') badgeText = `done · ${data.duration}s`;
+  else if (data.status === 'cancelled') badgeText = `cancelled · ${data.duration ?? '?'}s`;
+  else badgeText = `failed · exit ${data.exit_code}`;
+  setLogBadge(data.status, badgeText);
   refreshRuns();
 }
 
@@ -245,7 +523,7 @@ async function refreshRuns() {
   `).join('');
 }
 
-renderJobView();
+initLauncherPage();
 setInterval(refreshRuns, 5000);
 </script>
 {% endblock %}

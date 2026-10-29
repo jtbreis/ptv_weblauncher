@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+{% block title %}PDF Tracking — Job Launcher{% endblock %}
+{% block body %}
+<div style="max-width:960px;margin:0 auto;padding:24px 32px 48px">
+  <div class="main-header" style="border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:24px">
+    <div>
+      <div class="job-title">PDF Relaxed Tracking</div>
+      <div class="job-desc">
+        Start from a high-threshold STM file (<code>rays_out_cpp.h5</code> with loose <code>maxdistance</code>).
+        Graph-track only low-error particles to build a velocity PDF (e.g.&nbsp;<strong>v<sub>x</sub></strong>).
+        Then iteratively relax the error ceiling: each round re-runs graph linking on
+        <em>still-unmatched</em> detections only, and accepts new tracks whose segment
+        velocities fall inside the PDF. Matched particles are reserved and never re-used.
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px">
+      <button class="launch-btn" id="launch-btn" onclick="launchPdfTracking()">▶ Run</button>
+      <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="use-queue" />
+        Add to queue
+      </label>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">Data location</div>
+    <div class="env-grid">
+      <div class="env-field full">
+        <label class="env-label">Output Host Directory <span class="env-var-name">OUTPUT_DIR</span></label>
+        <input id="env-OUTPUT_DIR" value="/mnt/ssd" />
+      </div>
+      <div class="env-field full">
+        <label class="env-label">Output Base Path <span class="env-var-name">OUTPUT_BASE</span></label>
+        <input id="env-OUTPUT_BASE" value="data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">Case <span class="env-var-name">CASE</span></label>
+        <input id="env-CASE" value="TNTI_opposing_gravity" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">Runs <span class="env-var-name">RUNS</span></label>
+        <input id="env-RUNS" value="Run1" placeholder="Run1,Run2" />
+      </div>
+      <div class="env-field full">
+        <label class="env-label">STM filename <span class="env-var-name">STM_FILENAME</span></label>
+        <input id="env-STM_FILENAME" value="rays_out_cpp.h5" />
+        <div class="env-field-help">Input must include stereomatching error in <code>xyze[3]</code> (standard STM output).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">Filtering — relaxation passes</div>
+    <p class="form-section-desc">
+      Applied when accepting paths from the pre-built graph. The seed pass uses the tight error
+      threshold; later passes relax the error ceiling and require segment velocities inside the PDF band.
+    </p>
+    <div class="env-grid">
+      <div class="env-field">
+        <label class="env-label">Seed max error <span class="env-var-name">INITIAL_MAX_ERROR</span></label>
+        <input id="env-INITIAL_MAX_ERROR" value="0.05" />
+        <div class="env-field-help">Tightest error accepted in the seed pass; also defines the PDF reference pool.</div>
+      </div>
+      <div class="env-field">
+        <label class="env-label">Relaxation ceiling <span class="env-var-name">MAX_ERROR</span></label>
+        <input id="env-MAX_ERROR" value="0.2" />
+        <div class="env-field-help">Final error threshold in the sweep (0 = use STM maxdistance).</div>
+      </div>
+      <div class="env-field">
+        <label class="env-label">Error step <span class="env-var-name">ERROR_STEP</span></label>
+        <input id="env-ERROR_STEP" value="0.01" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">PDF variable <span class="env-var-name">PDF_VARIABLE</span></label>
+        <select id="env-PDF_VARIABLE">
+          <option value="vx" selected>vx</option>
+          <option value="vy">vy</option>
+          <option value="vz">vz</option>
+          <option value="speed">speed</option>
+        </select>
+        <div class="env-field-help">Kinematic gate for relaxation passes (after seed).</div>
+      </div>
+      <div class="env-field">
+        <label class="env-label">PDF percentile low <span class="env-var-name">PDF_PERCENTILE_LO</span></label>
+        <input id="env-PDF_PERCENTILE_LO" value="1" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">PDF percentile high <span class="env-var-name">PDF_PERCENTILE_HI</span></label>
+        <input id="env-PDF_PERCENTILE_HI" value="99" />
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">Graph linking — build once</div>
+    <p class="form-section-desc">
+      Used once to enumerate all candidate 4-frame paths. The same graph is reused for the seed pass
+      and every relaxation round; only acceptance criteria change between passes.
+    </p>
+    <div class="env-grid">
+      <div class="env-field">
+        <label class="env-label">Hop limit (mm) <span class="env-var-name">BOX_SIZE_TRACK</span></label>
+        <input id="env-BOX_SIZE_TRACK" value="0.2" />
+        <div class="env-field-help">Max prediction-to-detection distance when linking hops.</div>
+      </div>
+      <div class="env-field">
+        <label class="env-label">Min track length <span class="env-var-name">MIN_TRACK_LENGTH</span></label>
+        <input id="env-MIN_TRACK_LENGTH" value="3" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">Max branch <span class="env-var-name">MAX_BRANCH</span></label>
+        <input id="env-MAX_BRANCH" value="30" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">Max seeds (0 = all) <span class="env-var-name">MAX_SEEDS</span></label>
+        <input id="env-MAX_SEEDS" value="0" />
+      </div>
+      <div class="env-field full">
+        <div class="checkbox-row">
+          <input type="checkbox" id="env-USE_BIDIRECTIONAL_GRAPH" />
+          <label for="env-USE_BIDIRECTIONAL_GRAPH">
+            Bidirectional graph (forward + backward)
+            <span class="env-var-name">USE_BIDIRECTIONAL_GRAPH</span>
+          </label>
+        </div>
+        <div class="env-field-help">
+          Merge forward and backward 4-frame graphs; keep only consensus 4-frame paths.
+        </div>
+      </div>
+      <div class="env-field full">
+        <div class="checkbox-row">
+          <input type="checkbox" id="env-NO_3_FRAME" />
+          <label for="env-NO_3_FRAME">
+            4-frame tracks only
+            <span class="env-var-name">NO_3_FRAME</span>
+          </label>
+        </div>
+        <div class="env-field-help">Disable 3-frame path candidates (recommended with bidirectional mode).</div>
+      </div>
+      <div class="env-field">
+        <label class="env-label">Search box X low (mm) <span class="env-var-name">BOX_SIZE_INITIAL_X_LO</span></label>
+        <input id="env-BOX_SIZE_INITIAL_X_LO" value="0.0" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">Search box X high (mm) <span class="env-var-name">BOX_SIZE_INITIAL_X_HI</span></label>
+        <input id="env-BOX_SIZE_INITIAL_X_HI" value="3.5" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">Search box Y half-width (mm) <span class="env-var-name">BOX_SIZE_Y</span></label>
+        <input id="env-BOX_SIZE_Y" value="1.5" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">Search box Z half-width (mm) <span class="env-var-name">BOX_SIZE_Z</span></label>
+        <input id="env-BOX_SIZE_Z" value="1.5" />
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">Run settings</div>
+    <div class="env-grid">
+      <div class="env-field">
+        <label class="env-label">DT (s) <span class="env-var-name">DT</span></label>
+        <input id="env-DT" value="1e-3" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">Workers <span class="env-var-name">WORKERS</span></label>
+        <input id="env-WORKERS" value="4" />
+      </div>
+      <div class="env-field">
+        <label class="env-label">Max blocks (smoke test) <span class="env-var-name">MAX_BLOCKS</span></label>
+        <input id="env-MAX_BLOCKS" value="" placeholder="empty = all" />
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">Outputs</div>
+    <p class="env-field-help prominent" style="margin-bottom:12px">
+      Writes under each run directory:
+      <strong>rays_out_pdf_filtered.h5</strong>,
+      <strong>tracks_pdf_relaxed.h5part</strong>,
+      per-pass files <strong>tracks_pdf_pass_*.h5part</strong> and
+      <strong>rays_out_pdf_pass_*.h5</strong> (seed + each relaxation step),
+      and <strong>pdf_tracking_summary.json</strong> (PDF bounds + per-iteration stats).
+    </p>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-title">Log <span id="log-status"></span></div>
+    <div class="log-panel">
+      <div class="log-header">
+        <span class="log-title">
+          <span id="log-badge" class="badge pending">idle</span>
+          <span id="log-run-id" style="color:var(--text3);font-size:10px;"></span>
+        </span>
+        <button type="button" class="btn-danger" id="stop-run-btn" onclick="stopCurrentRun()" hidden>Stop</button>
+        <button class="log-clear" onclick="clearLog()">clear</button>
+      </div>
+      <div class="log-body" id="log-body"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const JOB_ID = 'pdf_relaxed_tracking';
+const ENV_FIELDS = [
+  'OUTPUT_DIR', 'OUTPUT_BASE', 'CASE', 'RUNS', 'STM_FILENAME',
+  'INITIAL_MAX_ERROR', 'MAX_ERROR', 'ERROR_STEP',
+  'PDF_VARIABLE', 'PDF_PERCENTILE_LO', 'PDF_PERCENTILE_HI',
+  'DT', 'BOX_SIZE_TRACK', 'WORKERS', 'MAX_BLOCKS', 'MIN_TRACK_LENGTH', 'MAX_BRANCH', 'MAX_SEEDS',
+  'BOX_SIZE_INITIAL_X_LO', 'BOX_SIZE_INITIAL_X_HI', 'BOX_SIZE_Y', 'BOX_SIZE_Z',
+];
+const CHECKBOX_FIELDS = ['USE_BIDIRECTIONAL_GRAPH', 'NO_3_FRAME'];
+
+let logSource = null;
+let currentRunId = null;
+
+function getEnvVars() {
+  const env = {};
+  for (const name of ENV_FIELDS) {
+    const el = document.getElementById('env-' + name);
+    if (el && el.value.trim()) env[name] = el.value.trim();
+  }
+  for (const name of CHECKBOX_FIELDS) {
+    const el = document.getElementById('env-' + name);
+    if (el && el.checked) env[name] = '1';
+  }
+  return env;
+}
+
+function appendLog(line) {
+  const body = document.getElementById('log-body');
+  if (!body) return;
+  body.textContent += line + '\n';
+  body.scrollTop = body.scrollHeight;
+}
+
+function clearLog() {
+  const body = document.getElementById('log-body');
+  if (body) body.textContent = '';
+}
+
+function setLogBadge(cls, text) {
+  const b = document.getElementById('log-badge');
+  if (!b) return;
+  b.className = 'badge ' + cls;
+  b.textContent = text;
+  b.classList.toggle('pulse', cls === 'running');
+}
+
+function setStopVisible(show) {
+  const stopBtn = document.getElementById('stop-run-btn');
+  if (stopBtn) {
+    stopBtn.hidden = !show;
+    stopBtn.disabled = false;
+  }
+}
+
+async function stopCurrentRun() {
+  if (!currentRunId) return;
+  if (!confirm('Stop this run?')) return;
+  const stopBtn = document.getElementById('stop-run-btn');
+  if (stopBtn) stopBtn.disabled = true;
+  try {
+    const res = await fetch('/api/runs/' + encodeURIComponent(currentRunId) + '/stop', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Stop failed');
+    appendLog('[stop] ' + (data.message || 'Stop requested'));
+  } catch (e) {
+    alert(e.message);
+    if (stopBtn) stopBtn.disabled = false;
+  }
+}
+
+function streamLogs(runId) {
+  logSource = new EventSource(`/api/runs/${runId}/logs`);
+  logSource.onmessage = e => {
+    if (e.data.startsWith('[FINISHED')) {
+      logSource.close();
+      return;
+    }
+    appendLog(e.data);
+  };
+  logSource.onerror = () => logSource.close();
+}
+
+async function pollStatus(runId) {
+  const res = await fetch(`/api/runs/${runId}`);
+  const data = await res.json();
+  if (data.status === 'running' || data.status === 'pending') {
+    setTimeout(() => pollStatus(runId), 1500);
+    return;
+  }
+  const btn = document.getElementById('launch-btn');
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Run'; }
+  setStopVisible(false);
+  currentRunId = null;
+  let badgeText;
+  if (data.status === 'done') badgeText = `done · ${data.duration}s`;
+  else if (data.status === 'cancelled') badgeText = `cancelled · ${data.duration ?? '?'}s`;
+  else badgeText = `failed · exit ${data.exit_code}`;
+  setLogBadge(data.status, badgeText);
+}
+
+async function launchPdfTracking() {
+  if (logSource) { logSource.close(); logSource = null; }
+  currentRunId = null;
+  setStopVisible(false);
+  clearLog();
+
+  const btn = document.getElementById('launch-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Launching...';
+  setLogBadge('pending', 'launching');
+
+  try {
+    const useQueue = document.getElementById('use-queue')?.checked;
+    const res = await fetch('/api/launch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job_id: JOB_ID, env: getEnvVars(), queue: !!useQueue }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Server error');
+
+    if (data.queued) {
+      appendLog(`[queued] ${data.job_name}\nqueue_id=${data.queue_id}\nOpen /queue for lineup.`);
+      document.getElementById('log-run-id').textContent = (data.queue_id || '').slice(0, 8);
+      setLogBadge('pending', 'queued');
+      btn.disabled = false;
+      btn.textContent = '▶ Run';
+      return;
+    }
+
+    currentRunId = data.run_id;
+    document.getElementById('log-run-id').textContent = data.run_id.slice(0, 8);
+    setLogBadge('running', 'running');
+    btn.textContent = '⏳ Running...';
+    setStopVisible(true);
+    streamLogs(data.run_id);
+    pollStatus(data.run_id);
+  } catch (e) {
+    setLogBadge('failed', 'error');
+    appendLog('ERROR: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '▶ Run';
+  }
+}
+
+(function prefillFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('case')) {
+    const el = document.getElementById('env-CASE');
+    if (el) el.value = params.get('case');
+  }
+  if (params.get('runs')) {
+    const el = document.getElementById('env-RUNS');
+    if (el) el.value = params.get('runs');
+  }
+  if (params.get('base')) {
+    const el = document.getElementById('env-OUTPUT_BASE');
+    if (el) el.value = 'data/' + params.get('base').replace(/^data\//, '');
+  }
+})();
+</script>
+{% endblock %}

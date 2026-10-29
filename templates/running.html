@@ -16,10 +16,11 @@
             <th>Started</th>
             <th>PID</th>
             <th>Parameters</th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="active-body">
-          <tr><td colspan="6" style="color:var(--text3)">Loading…</td></tr>
+          <tr><td colspan="7" style="color:var(--text3)">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -34,6 +35,20 @@ function fmtEnv(env) {
   if (!env || typeof env !== 'object') return '';
   return Object.entries(env).map(([k,v]) => k + '=' + v).join(', ');
 }
+async function stopRun(runId, btn) {
+  if (!confirm('Stop this run? Docker child processes will be terminated.')) return;
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/runs/' + encodeURIComponent(runId) + '/stop', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Stop failed');
+    load();
+  } catch (e) {
+    alert(e.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function load() {
   const res = await fetch('/api/runs/active');
   const data = await res.json();
@@ -41,7 +56,7 @@ async function load() {
   const tb = document.getElementById('active-body');
   const empty = document.getElementById('active-empty');
   if (!items.length) {
-    tb.innerHTML = '<tr><td colspan="6" style="color:var(--text3)">No active jobs.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="7" style="color:var(--text3)">No active jobs.</td></tr>';
     empty.hidden = false;
     return;
   }
@@ -56,8 +71,12 @@ async function load() {
       <td style="font-family:var(--mono);font-size:11px">${esc(r.started_at)}</td>
       <td style="font-family:var(--mono);font-size:11px">${r.pid != null ? esc(String(r.pid)) : '—'}</td>
       <td style="font-family:var(--mono);font-size:10px;color:var(--text2);max-width:360px" title="${esc(envStr)}">${esc(envShort)}</td>
+      <td><button type="button" class="btn-danger stop-btn" data-run-id="${esc(r.run_id)}">Stop</button></td>
     </tr>`;
   }).join('');
+  tb.querySelectorAll('.stop-btn').forEach(btn => {
+    btn.addEventListener('click', () => stopRun(btn.getAttribute('data-run-id'), btn));
+  });
 }
 load();
 setInterval(load, 4000);

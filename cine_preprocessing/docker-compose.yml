@@ -1,0 +1,21 @@
+services:
+  cine-preprocessing:
+    build: .
+    container_name: cine-preprocessing
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5001"
+    volumes:
+      # Repo root — needs read access to raw_data/*.cine
+      - ${REPO_ROOT:-../..}:/repo:ro
+      - ../../scripts/cine_preprocessing_core.py:/app/cine_preprocessing_core.py:ro
+      # Live-mount app code during development
+      - ./app.py:/app/app.py:ro
+      - ./preprocessing.py:/app/preprocessing.py:ro
+      - ./templates:/app/templates:ro
+    environment:
+      - REPO_ROOT=/repo
+      - PORT=5001
+      - JOB_LAUNCHER_URL=http://127.0.0.1:5000
+      - FLASK_TEMPLATES_AUTO_RELOAD=1
+      - TZ=America/Los_Angeles

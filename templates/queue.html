@@ -13,7 +13,10 @@
         <div id="runner-active" hidden>
           <p style="margin-bottom:8px"><span class="badge running pulse">running</span> <span id="runner-name"></span></p>
           <p style="font-family:var(--mono);font-size:11px;color:var(--text3)">run_id: <span id="runner-runid"></span> · queue_id: <span id="runner-qid"></span></p>
-          <p style="margin-top:8px"><a id="runner-link" href="#" class="btn-secondary">Open logs / re-run</a></p>
+          <p style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <a id="runner-link" href="#" class="btn-secondary">Open logs / re-run</a>
+            <button type="button" class="btn-danger" id="runner-stop-btn">Stop run</button>
+          </p>
         </div>
       </div>
     </div>
@@ -57,6 +60,18 @@ async function load() {
     document.getElementById('runner-runid').textContent = esc(run.run_id || '');
     document.getElementById('runner-qid').textContent = esc((run.queue_id || '').slice(0,8)) + '…';
     document.getElementById('runner-link').href = '/runs/' + encodeURIComponent(run.run_id);
+    const stopBtn = document.getElementById('runner-stop-btn');
+    if (stopBtn) {
+      stopBtn.disabled = false;
+      stopBtn.onclick = async () => {
+        if (!confirm('Stop this run?')) return;
+        stopBtn.disabled = true;
+        const r = await fetch('/api/runs/' + encodeURIComponent(run.run_id) + '/stop', { method: 'POST' });
+        const j = await r.json();
+        if (!r.ok) { alert(j.error || 'Stop failed'); stopBtn.disabled = false; }
+        else load();
+      };
+    }
   }
 
   const tb = document.getElementById('waiting-body');

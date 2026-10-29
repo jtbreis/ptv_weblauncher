@@ -15,6 +15,11 @@
       {% if finished_at %}<span style="color:var(--text2);font-size:12px">Finished {{ finished_at|e }}</span>{% endif %}
       {% if duration is not none %}<span style="color:var(--text2);font-size:12px">{{ duration }}s</span>{% endif %}
       {% if exit_code is not none %}<span style="color:var(--text2);font-size:12px">exit {{ exit_code }}</span>{% endif %}
+      {% if is_live %}
+      <button type="button" class="btn-danger" id="btn-stop-run">Stop run</button>
+      {% else %}
+      <button type="button" class="btn-danger" id="btn-delete-history">Delete from history</button>
+      {% endif %}
     </div>
 
     <div class="form-section">
@@ -22,7 +27,84 @@
       <form id="rerun-form" class="env-grid" style="margin-bottom:8px">
         <input type="hidden" id="job_id" value="{{ job_cfg.id|e }}" />
         {% for e in job_cfg.env or [] %}
-        <div class="env-field{% if e.name in ['OUTPUT_DIR','OUTPUT_BASE','BOUNDING_BOX','NVOXELS'] %} full{% endif %}">
+        {% if e.type == 'per_camera_select' %}
+        {% set n = e.cameras or 4 %}
+        {% set def_th = e.default or 'TH1' %}
+        {% set th_parts = env_used.get(e.name, '').split(',') if env_used.get(e.name) else [] %}
+        <div class="env-field full">
+          <div class="per-camera-panel">
+            <div>
+              <div class="per-camera-panel-title">{{ e.label|e }}</div>
+              <div class="per-camera-panel-sub">Each camera shows its assigned threshold. Pick TH1 (low) or TH2 (high) independently.</div>
+              {% if e.help %}<div class="env-field-help prominent">{{ e.help|e }}</div>{% endif %}
+            </div>
+            <div class="per-camera-grid">
+              {% for i in range(1, n + 1) %}
+              {% set val = th_parts[loop.index0]|trim|upper if loop.index0 < th_parts|length else def_th|upper %}
+              {% set th_class = 'is-th2' if val == 'TH2' else 'is-th1' %}
+              <div class="camera-th-card {{ th_class }}" id="card-{{ e.name|e }}-cam{{ i }}">
+                <div class="camera-th-card-head">
+                  <span class="camera-th-name">Camera {{ i }}</span>
+                  <span class="camera-th-badge" id="badge-{{ e.name|e }}-cam{{ i }}">{{ val|e }}</span>
+                </div>
+                <div class="camera-th-folder" id="folder-{{ e.name|e }}-cam{{ i }}">→ Centers_{{ val|e }}/</div>
+                <label class="env-label" for="f-{{ e.name|e }}-cam{{ i }}">Change threshold</label>
+                <select id="f-{{ e.name|e }}-cam{{ i }}" name="{{ e.name|e }}-cam{{ i }}" data-threshold-field="{{ e.name|e }}" data-camera-num="{{ i }}">
+                  {% for opt in e.options or ['TH1', 'TH2'] %}
+                  <option value="{{ opt|e }}"{% if val == opt %} selected{% endif %}>{{ opt|e }} — Centers_{{ opt|e }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="per-camera-preview">
+              <div class="per-camera-preview-title">Assignment summary</div>
+              <div class="per-camera-map" data-threshold-map="{{ e.name|e }}">
+                {% for i in range(1, n + 1) %}
+                {% set val = th_parts[loop.index0]|trim|upper if loop.index0 < th_parts|length else def_th|upper %}
+                <div class="per-camera-map-item" id="map-{{ e.name|e }}-cam{{ i }}">
+                  <span class="cam-label">Cam {{ i }}</span>
+                  <span class="cam-arrow">→</span>
+                  <span class="cam-th">{{ val|e }}</span>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        </div>
+        {% elif e.type == 'select' %}
+        {% set cur = env_used.get(e.name, e.default) %}
+        <div class="env-field full">
+          <label class="env-label" for="f-{{ e.name|e }}">
+            {% if e.required %}<span class="required-dot"></span>{% endif %}
+            {{ e.label|e }}
+            <span class="env-var-name">{{ e.name|e }}</span>
+          </label>
+          <select id="f-{{ e.name|e }}" name="{{ e.name|e }}">
+            {% for opt in e.options or [] %}
+            {% if opt is mapping %}
+            <option value="{{ opt.value|e }}"{% if cur == opt.value %} selected{% endif %}>{{ (opt.label or opt.value)|e }}</option>
+            {% else %}
+            <option value="{{ opt|e }}"{% if cur == opt %} selected{% endif %}>{{ opt|e }}</option>
+            {% endif %}
+            {% endfor %}
+          </select>
+          {% if e.help %}<div class="env-field-help">{{ e.help|e }}</div>{% endif %}
+        </div>
+        {% elif e.type == 'checkbox' %}
+        {% set checked = env_used.get(e.name, e.default) in [True, '1', 'true', 'True', 'yes', 'on'] %}
+        <div class="env-field full">
+          <div class="checkbox-row">
+            <input type="checkbox" id="f-{{ e.name|e }}" name="{{ e.name|e }}"{% if checked %} checked{% endif %} />
+            <label for="f-{{ e.name|e }}">
+              {{ e.label|e }}
+              <span class="env-var-name">{{ e.name|e }}</span>
+            </label>
+          </div>
+          {% if e.help %}<div class="env-field-help">{{ e.help|e }}</div>{% endif %}
+        </div>
+        {% else %}
+        <div class="env-field{% if e.name in ['INPUT_DIR','INPUT_BASE','OUTPUT_DIR','OUTPUT_BASE','BOUNDING_BOX','NVOXELS'] %} full{% endif %}">
           <label class="env-label" for="f-{{ e.name|e }}">
             {% if e.required %}<span class="required-dot"></span>{% endif %}
             {{ e.label|e }}
@@ -35,20 +117,11 @@
             placeholder="{{ (e.placeholder or '')|e }}"
             data-required="{{ 'true' if e.required else 'false' }}"
           />
+          {% if e.help %}<div class="env-field-help">{{ e.help|e }}</div>{% endif %}
         </div>
+        {% endif %}
         {% endfor %}
       </form>
-      {% if extra_env %}
-      <div class="form-section-title" style="margin-top:20px">Parameters not in current job template</div>
-      <div class="env-grid" id="extra-params">
-        {% for name, val in extra_env.items() %}
-        <div class="env-field full">
-          <label class="env-label" for="f-extra-{{ loop.index0 }}">{{ name|e }}</label>
-          <input id="f-extra-{{ loop.index0 }}" name="{{ name|e }}" value="{{ val|e }}" />
-        </div>
-        {% endfor %}
-      </div>
-      {% endif %}
       <div class="actions-row" style="flex-wrap:wrap">
         <button type="button" class="btn-primary" id="btn-rerun">▶ Launch with these settings</button>
         <button type="button" class="launch-btn" id="btn-enqueue" style="background:var(--bg3);color:var(--accent);border:1px solid var(--border2)">Add to queue</button>
@@ -72,10 +145,59 @@
 const IS_LIVE = {{ 'true' if is_live else 'false' }};
 const RUN_ID = {{ run_id|tojson }};
 
+function syncDetailCameraThCard(fieldName, camNum) {
+  const sel = document.getElementById(`f-${fieldName}-cam${camNum}`);
+  if (!sel) return;
+  const th = sel.value || 'TH1';
+  const card = document.getElementById(`card-${fieldName}-cam${camNum}`);
+  const badge = document.getElementById(`badge-${fieldName}-cam${camNum}`);
+  const folder = document.getElementById(`folder-${fieldName}-cam${camNum}`);
+  const mapTh = document.querySelector(`#map-${fieldName}-cam${camNum} .cam-th`);
+  if (card) {
+    card.classList.remove('is-th1', 'is-th2');
+    card.classList.add(th === 'TH2' ? 'is-th2' : 'is-th1');
+  }
+  if (badge) badge.textContent = th;
+  if (folder) folder.textContent = `→ Centers_${th}/`;
+  if (mapTh) mapTh.textContent = th;
+}
+
+function initDetailPerCameraFields() {
+  document.querySelectorAll('#rerun-form select[data-threshold-field]').forEach(sel => {
+    const field = sel.getAttribute('data-threshold-field');
+    const camNum = sel.getAttribute('data-camera-num');
+    if (!field || !camNum) return;
+    syncDetailCameraThCard(field, camNum);
+    sel.addEventListener('change', () => syncDetailCameraThCard(field, camNum));
+  });
+}
+
 function gatherEnv() {
   const env = {};
-  document.querySelectorAll('#rerun-form input[name], #extra-params input[name]').forEach(el => {
-    if (el.name && el.value) env[el.name] = el.value;
+  document.querySelectorAll('#rerun-form input[name]:not([data-threshold-field])').forEach(el => {
+    if (!el.name) return;
+    if (el.type === 'checkbox') {
+      if (el.checked) env[el.name] = '1';
+      return;
+    }
+    if (el.value) env[el.name] = el.value;
+  });
+  document.querySelectorAll('#rerun-form select[name]:not([data-threshold-field])').forEach(el => {
+    if (!el.name) return;
+    if (el.value) env[el.name] = el.value;
+  });
+  const thresholdFields = {};
+  document.querySelectorAll('#rerun-form select[data-threshold-field]').forEach(el => {
+    const field = el.getAttribute('data-threshold-field');
+    const idx = parseInt(el.id.split('-cam').pop(), 10) - 1;
+    if (!field || Number.isNaN(idx)) return;
+    if (!thresholdFields[field]) thresholdFields[field] = {};
+    thresholdFields[field][idx] = el.value;
+  });
+  Object.entries(thresholdFields).forEach(([field, map]) => {
+    const indices = Object.keys(map).map(Number);
+    const n = Math.max(...indices) + 1;
+    env[field] = Array.from({ length: n }, (_, i) => map[i] || 'TH1').join(',');
   });
   return env;
 }
@@ -117,12 +239,62 @@ async function launchOrQueue(queue) {
 
 document.getElementById('btn-rerun').addEventListener('click', () => launchOrQueue(false));
 document.getElementById('btn-enqueue').addEventListener('click', () => launchOrQueue(true));
+initDetailPerCameraFields();
+
+async function deleteFromHistory() {
+  if (!confirm('Remove this run from history?')) return;
+  const btn = document.getElementById('btn-delete-history');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/history/' + encodeURIComponent(RUN_ID), { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Delete failed');
+    window.location.href = '{{ url_for("history_page") }}';
+  } catch (e) {
+    alert(e.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+const deleteHistBtn = document.getElementById('btn-delete-history');
+if (deleteHistBtn) deleteHistBtn.addEventListener('click', deleteFromHistory);
+
+async function stopRun() {
+  const btn = document.getElementById('btn-stop-run');
+  if (!confirm('Stop this run? Docker child processes will be terminated.')) return;
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/runs/' + encodeURIComponent(RUN_ID) + '/stop', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Stop failed');
+    document.getElementById('rerun-msg').textContent = data.message || 'Stop requested';
+  } catch (e) {
+    alert(e.message);
+    if (btn) btn.disabled = false;
+  }
+}
 
 if (IS_LIVE) {
+  const stopBtn = document.getElementById('btn-stop-run');
+  if (stopBtn) stopBtn.addEventListener('click', stopRun);
+
   const logBody = document.getElementById('log-body');
   const es = new EventSource('/api/runs/' + encodeURIComponent(RUN_ID) + '/logs');
   es.onmessage = ev => {
-    if (ev.data.startsWith('[FINISHED')) { es.close(); return; }
+    if (ev.data.startsWith('[FINISHED')) {
+      es.close();
+      if (stopBtn) stopBtn.hidden = true;
+      fetch('/api/runs/' + encodeURIComponent(RUN_ID))
+        .then(r => r.json())
+        .then(d => {
+          const badge = document.querySelector('.actions-row .badge');
+          if (badge) {
+            badge.className = 'badge ' + d.status;
+            badge.textContent = d.status;
+          }
+        });
+      return;
+    }
     logBody.textContent += ev.data + '\n';
     logBody.scrollTop = logBody.scrollHeight;
   };

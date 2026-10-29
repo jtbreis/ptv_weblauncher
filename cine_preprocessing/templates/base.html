@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Cine Preprocessing{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f0e; --bg2: #141614; --bg3: #1a1d1a;
+    --border: #2a2e2a; --border2: #3a3e3a;
+    --accent: #00ff88; --accent2: #00cc6a; --danger: #ff4444;
+    --text: #d4d8d4; --text2: #8a8e8a; --text3: #5a5e5a;
+    --mono: 'IBM Plex Mono', monospace; --sans: 'IBM Plex Sans', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; min-height: 100vh; }
+  .top-nav {
+    display: flex; align-items: center; gap: 8px; padding: 10px 20px;
+    background: var(--bg2); border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  }
+  .top-nav a, .top-nav .brand {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text2); text-decoration: none; padding: 6px 12px; border-radius: 2px; border: 1px solid transparent;
+  }
+  .top-nav .brand { color: var(--accent); border-color: #004433; background: #001a12; }
+  .top-nav a:hover { color: var(--accent); border-color: var(--border2); }
+  .top-nav a.active { color: var(--accent); border-color: #004433; background: #001a12; }
+  .main-header { padding: 24px 32px 20px; border-bottom: 1px solid var(--border); }
+  .job-title { font-size: 20px; font-weight: 300; letter-spacing: -0.02em; margin-bottom: 4px; }
+  .job-desc { font-size: 13px; color: var(--text2); }
+  .content { padding: 24px 32px; }
+  .form-section { margin-bottom: 24px; }
+  .form-section-title {
+    font-family: var(--mono); font-size: 10px; color: var(--text3); letter-spacing: 0.12em;
+    text-transform: uppercase; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .env-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .env-field { display: flex; flex-direction: column; gap: 5px; }
+  .env-field.full { grid-column: 1 / -1; }
+  .env-label { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .env-field input, .env-field select {
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text);
+    font-family: var(--mono); font-size: 12px; padding: 8px 10px; border-radius: 2px; outline: none;
+  }
+  .env-field input:focus, .env-field select:focus { border-color: var(--accent); }
+  .btn-primary {
+    background: var(--accent); color: #000; border: none; padding: 10px 24px; font-family: var(--mono);
+    font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; border-radius: 2px; width: 100%;
+  }
+  .btn-primary:hover { background: var(--accent2); }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 3px; }
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.data-table th, table.data-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  table.data-table th { font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; background: var(--bg2); }
+  table.data-table tr:hover td { background: var(--bg3); }
+</style>
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+<nav class="top-nav">
+  <span class="brand">Cine preprocessing</span>
+  <a href="/" class="active">Explorer</a>
+  <a href="{{ job_launcher_url }}" target="_blank" rel="noopener">Job launcher ↗</a>
+</nav>
+{% block body %}{% endblock %}
+</body>
+</html>

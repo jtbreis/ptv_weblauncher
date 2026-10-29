@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }} — PTV Launcher{% endblock %}
+{% block extra_head %}
+<style>
+  .sensitivity-wrap { max-width: 1100px; margin: 0 auto; padding: 28px 32px 48px; }
+  .sensitivity-card {
+    border: 1px solid var(--border); border-radius: 4px; background: var(--bg2);
+    padding: 24px; margin-bottom: 28px;
+  }
+  .sensitivity-card h2 { font-size: 18px; font-weight: 400; margin-bottom: 8px; }
+  .sensitivity-card p { color: var(--text2); font-size: 13px; line-height: 1.55; margin-bottom: 18px; max-width: 72ch; }
+  .output-note {
+    font-family: var(--mono); font-size: 11px; color: var(--text3);
+    padding: 10px 12px; background: var(--bg3); border: 1px solid var(--border); border-radius: 3px;
+    margin-bottom: 18px;
+  }
+  .log-panel { border: 1px solid var(--border); border-radius: 3px; background: var(--bg2); margin-top: 28px; }
+  .log-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .log-body { font-family: var(--mono); font-size: 11px; line-height: 1.5; padding: 12px 14px; max-height: 360px; overflow-y: auto; white-space: pre-wrap; color: var(--text2); }
+  .badge { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 2px; text-transform: uppercase; }
+  .badge.pending { background: var(--bg3); color: var(--text3); }
+  .badge.running { background: #1a2a1a; color: var(--accent); }
+  .badge.done { background: #1a2a1a; color: var(--accent); }
+  .badge.failed { background: #2a1a1a; color: var(--danger); }
+  .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 6px 12px; font-family: var(--mono); font-size: 11px; cursor: pointer; border-radius: 2px; }
+</style>
+{% endblock %}
+{% block body %}
+<div class="sensitivity-wrap">
+  <h1 class="page-title">{{ page_title }}</h1>
+  <p class="page-desc">{{ page_description }}</p>
+
+  <div class="sensitivity-card" id="sweep-card">
+    <h2>Run sensitivity sweep</h2>
+    <p>{{ sweep_job.description }}</p>
+    <div class="output-note">
+      PDF outputs → <code>{OUTPUT_DIR}/{OUTPUT_BASE}/{CASE}/{RUN}/{{ analysis_subdir }}/</code>
+    </div>
+    <div class="form-section">
+      <div class="form-section-title">Parameters</div>
+      <div class="env-grid" id="sweep-env-grid"></div>
+    </div>
+    <div class="actions-row">
+      <button class="launch-btn" id="sweep-launch-btn" onclick="launchSweep()">▶ Run sweep</button>
+      <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="sweep-use-queue" /> Add to queue
+      </label>
+    </div>
+  </div>
+
+  <div class="sensitivity-card" id="analysis-card">
+    <h2>Re-run analysis only</h2>
+    <p>{{ analysis_job.description }}</p>
+    <div class="form-section">
+      <div class="form-section-title">Run location</div>
+      <div class="env-grid" id="analysis-env-grid"></div>
+    </div>
+    <div class="actions-row">
+      <button class="btn-secondary" id="analysis-launch-btn" onclick="launchAnalysis()">▶ Generate PDFs</button>
+      <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <input type="checkbox" id="analysis-use-queue" /> Add to queue
+      </label>
+    </div>
+  </div>
+
+  <div class="log-panel">
+    <div class="log-header">
+      <span>
+        <span id="log-badge" class="badge pending">idle</span>
+        <span id="log-run-id" style="color:var(--text3);font-size:10px;margin-left:8px;"></span>
+      </span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button type="button" class="btn-danger" id="stop-run-btn" onclick="stopCurrentRun()" hidden>Stop</button>
+        <button class="btn-secondary" onclick="clearLog()">Clear</button>
+      </div>
+    </div>
+    <div class="log-body" id="log-body"></div>
+  </div>
+</div>
+
+<script>
+const SWEEP_JOB = {{ sweep_job | tojson }};
+const ANALYSIS_JOB = {{ analysis_job | tojson }};
+
+let currentRunId = null;
+let logSource = null;
+
+function _esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
+function renderEnvField(e, prefix) {
+  const full = ['INPUT_DIR','INPUT_BASE','OUTPUT_DIR','OUTPUT_BASE'].includes(e.name);
+  const type = e.type || 'text';
+  const id = `${prefix}-env-${e.name}`;
+
+  if (type === 'checkbox') {
+    const checked = e.default === true || String(e.default).toLowerCase() === 'true' || e.default === '1';
+    return `
+      <div class="env-field full">
+        <div class="checkbox-row">
+          <input type="checkbox" id="${id}" ${checked ? 'checked' : ''} />
+          <label for="${id}">${_esc(e.label)} <span class="env-var-name">${_esc(e.name)}</span></label>
+        </div>
+        ${e.help ? `<div class="env-field-help">${_esc(e.help)}</div>` : ''}
+      </div>`;
+  }
+
+  return `
+    <div class="env-field${full ? ' full' : ''}">
+      <label class="env-label" for="${id}">
+        ${e.required ? '<span class="required-dot"></span>' : ''}
+        ${_esc(e.label)}
+        <span class="env-var-name">${_esc(e.name)}</span>
+      </label>
+      <input id="${id}" value="${_esc(e.default || '')}" placeholder="${_esc(e.placeholder || '')}" />
+      ${e.help ? `<div class="env-field-help">${_esc(e.help)}</div>` : ''}
+    </div>`;
+}
+
+function readEnv(prefix, job) {
+  const env = {};
+  (job.env || []).forEach(e => {
+    const type = e.type || 'text';
+    const id = `${prefix}-env-${e.name}`;
+    const el = document.getElementById(id);
+    if (type === 'checkbox') {
+      if (el && el.checked) env[e.name] = '1';
+      return;
+    }
+    const val = el ? el.value : '';
+    if (val) env[e.name] = val;
+  });
+  return env;
+}
+
+function setBadge(status) {
+  const badge = document.getElementById('log-badge');
+  badge.className = 'badge ' + (status || 'pending');
+  badge.textContent = status || 'idle';
+}
+
+function appendLog(line) {
+  const body = document.getElementById('log-body');
+  body.textContent += (body.textContent ? '\n' : '') + line;
+  body.scrollTop = body.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('log-body').textContent = '';
+  setBadge('idle');
+  document.getElementById('log-run-id').textContent = '';
+}
+
+function setStopVisible(show) {
+  document.getElementById('stop-run-btn').hidden = !show;
+}
+
+function connectLogStream(runId) {
+  if (logSource) logSource.close();
+  logSource = new EventSource('/api/runs/' + encodeURIComponent(runId) + '/stream');
+  logSource.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      if (data.line) appendLog(data.line);
+      if (data.status) {
+        setBadge(data.status);
+        if (['done', 'failed', 'cancelled'].includes(data.status)) {
+          setStopVisible(false);
+          logSource.close();
+          logSource = null;
+        }
+      }
+    } catch (_) {}
+  };
+}
+
+async function launchJob(jobId, env, useQueue) {
+  const res = await fetch('/api/launch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: jobId, env, queue: useQueue }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Launch failed');
+  if (data.queued) {
+    appendLog(`[queue] ${data.job_name} queued (position ${data.waiting_line_position})`);
+    setBadge('pending');
+    return;
+  }
+  currentRunId = data.run_id;
+  document.getElementById('log-run-id').textContent = currentRunId.slice(0, 8) + '…';
+  setBadge('running');
+  setStopVisible(true);
+  connectLogStream(currentRunId);
+}
+
+async function launchSweep() {
+  clearLog();
+  try {
+    await launchJob(
+      SWEEP_JOB.id,
+      readEnv('sweep', SWEEP_JOB),
+      document.getElementById('sweep-use-queue').checked,
+    );
+  } catch (e) {
+    appendLog('ERROR: ' + e.message);
+    setBadge('failed');
+  }
+}
+
+async function launchAnalysis() {
+  clearLog();
+  try {
+    await launchJob(
+      ANALYSIS_JOB.id,
+      readEnv('analysis', ANALYSIS_JOB),
+      document.getElementById('analysis-use-queue').checked,
+    );
+  } catch (e) {
+    appendLog('ERROR: ' + e.message);
+    setBadge('failed');
+  }
+}
+
+async function stopCurrentRun() {
+  if (!currentRunId) return;
+  if (!confirm('Stop this run?')) return;
+  const res = await fetch('/api/runs/' + encodeURIComponent(currentRunId) + '/stop', { method: 'POST' });
+  const data = await res.json();
+  if (!res.ok) alert(data.error || 'Stop failed');
+}
+
+document.getElementById('sweep-env-grid').innerHTML =
+  (SWEEP_JOB.env || []).map(e => renderEnvField(e, 'sweep')).join('');
+document.getElementById('analysis-env-grid').innerHTML =
+  (ANALYSIS_JOB.env || []).map(e => renderEnvField(e, 'analysis')).join('');
+</script>
+{% endblock %}

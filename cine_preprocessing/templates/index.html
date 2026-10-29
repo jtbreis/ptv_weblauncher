@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% block title %}Cine Preprocessing Explorer{% endblock %}
+{% block extra_head %}
+<style>
+  .cine-layout { display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 44px); }
+  .cine-sidebar { background: var(--bg2); border-right: 1px solid var(--border); overflow-y: auto; max-height: calc(100vh - 44px); }
+  .cine-sidebar-inner { padding: 16px 18px 32px; display: flex; flex-direction: column; gap: 18px; }
+  .cine-main { overflow-y: auto; max-height: calc(100vh - 44px); }
+  .tab-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
+  .tab-btn {
+    background: var(--bg3); border: 1px solid var(--border2); color: var(--text2);
+    font-family: var(--mono); font-size: 11px; padding: 8px 14px; border-radius: 2px; cursor: pointer;
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .tab-btn.active { color: var(--accent); border-color: #004433; background: #001a12; }
+  .tab-btn:hover { color: var(--accent); }
+  .img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .img-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .img-card-title {
+    font-family: var(--mono); font-size: 10px; color: var(--text2); padding: 8px 10px;
+    border-bottom: 1px solid var(--border); letter-spacing: 0.03em;
+  }
+  .img-card img { display: block; width: 100%; height: auto; background: #000; }
+  .meta-bar { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-bottom: 16px; line-height: 1.6; }
+  .meta-bar strong { color: var(--accent); font-weight: 500; }
+  .status-line { font-family: var(--mono); font-size: 11px; color: var(--text2); min-height: 18px; margin-bottom: 12px; }
+  .status-line.error { color: var(--danger); }
+  .param-block { border-top: 1px solid var(--border); padding-top: 12px; }
+  .param-block summary {
+    font-family: var(--mono); font-size: 10px; color: var(--text3); letter-spacing: 0.1em;
+    text-transform: uppercase; cursor: pointer; margin-bottom: 10px; list-style: none;
+  }
+  .param-block summary::-webkit-details-marker { display: none; }
+  .range-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .range-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--text2); }
+  .range-label span:last-child { color: var(--accent); }
+  .range-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .detect-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+  @media (max-width: 900px) {
+    .cine-layout { grid-template-columns: 1fr; }
+    .detect-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+{% block body %}
+<div class="cine-layout">
+  <aside class="cine-sidebar">
+    <div class="cine-sidebar-inner">
+      <div class="form-section" style="margin:0;">
+        <div class="form-section-title">Data</div>
+        <div class="env-field full" style="margin-bottom:10px;">
+          <label class="env-label" for="run-select">Run folder</label>
+          <select id="run-select"></select>
+        </div>
+        <div class="env-field full" style="margin-bottom:10px;">
+          <label class="env-label" for="run-dir">Or path under repo</label>
+          <input id="run-dir" type="text" spellcheck="false">
+        </div>
+        <div class="env-grid">
+          <div class="env-field">
+            <label class="env-label" for="camera">Camera</label>
+            <select id="camera"></select>
+          </div>
+          <div class="env-field">
+            <label class="env-label" for="frame-index">Frame</label>
+            <input id="frame-index" type="number" min="0" step="1" value="1">
+          </div>
+        </div>
+        <div class="range-row" style="margin-top:10px;">
+          <div class="range-label"><span>Center window</span><span id="val-center-window">128</span></div>
+          <input id="center-window" type="range" min="64" max="256" step="32" value="128">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Raw display vmax</span><span id="val-display-vmax">80</span></div>
+          <input id="display-vmax" type="range" min="10" max="200" step="5" value="80">
+        </div>
+      </div>
+
+      <div class="form-section" style="margin:0;">
+        <div class="form-section-title">Pipeline</div>
+        <div class="env-field full"><select id="pipeline"></select></div>
+      </div>
+
+      <details class="param-block" open>
+        <summary>Percentile stretch</summary>
+        <div class="range-row">
+          <div class="range-label"><span>Low %</span><span id="val-percentile-low">1</span></div>
+          <input id="percentile-low" type="range" min="0" max="20" step="0.5" value="1">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>High %</span><span id="val-percentile-high">99.5</span></div>
+          <input id="percentile-high" type="range" min="80" max="100" step="0.5" value="99.5">
+        </div>
+      </details>
+
+      <details class="param-block">
+        <summary>Gaussian blur (pre-stretch)</summary>
+        <div class="range-row">
+          <div class="range-label"><span>Kernel</span><span id="val-gaussian-blur">3</span></div>
+          <input id="gaussian-blur" type="range" min="1" max="15" step="2" value="3">
+        </div>
+      </details>
+
+      <details class="param-block" open>
+        <summary>Background removal</summary>
+        <div class="range-row">
+          <div class="range-label"><span>Top-hat k</span><span id="val-tophat">15</span></div>
+          <input id="tophat" type="range" min="3" max="51" step="2" value="15">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Gaussian bg k</span><span id="val-bg-gaussian">31</span></div>
+          <input id="bg-gaussian" type="range" min="3" max="101" step="2" value="31">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Median bg k</span><span id="val-bg-median">31</span></div>
+          <input id="bg-median" type="range" min="3" max="101" step="2" value="31">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Bandpass lshort</span><span id="val-bp-short">1</span></div>
+          <input id="bp-short" type="range" min="1" max="9" step="1" value="1">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Bandpass llong</span><span id="val-bp-long">9</span></div>
+          <input id="bp-long" type="range" min="3" max="31" step="2" value="9">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Bandpass thr %</span><span id="val-bp-thr">90</span></div>
+          <input id="bp-thr" type="range" min="50" max="99" step="1" value="90">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Bandpass thr abs</span><span id="val-bp-thr-abs">0</span></div>
+          <input id="bp-thr-abs" type="range" min="0" max="100" step="1" value="0">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Rolling-ball radius</span><span id="val-rb-radius">25</span></div>
+          <input id="rb-radius" type="range" min="5" max="80" step="1" value="25">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Morph-open k</span><span id="val-morph-open">31</span></div>
+          <input id="morph-open" type="range" min="5" max="101" step="2" value="31">
+        </div>
+        <div class="env-field full" style="margin-top:8px">
+          <label for="bp-bg-method">Bandpass → bg method</label>
+          <select id="bp-bg-method">
+            <option value="rolling_ball">rolling_ball</option>
+            <option value="morph_open" selected>morph_open</option>
+            <option value="gaussian">gaussian</option>
+            <option value="median">median</option>
+            <option value="tophat">tophat</option>
+          </select>
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Clip darkest %</span><span id="val-bg-clip">0</span></div>
+          <input id="bg-clip" type="range" min="0" max="20" step="0.5" value="0">
+        </div>
+      </details>
+
+      <details class="param-block" open>
+        <summary>Trackpy detection</summary>
+        <div class="range-row">
+          <div class="range-label"><span>Diameter</span><span id="val-diameter">7</span></div>
+          <input id="diameter" type="range" min="3" max="15" step="1" value="7">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Threshold</span><span id="val-threshold">10</span></div>
+          <input id="threshold" type="range" min="1" max="50" step="1" value="10">
+        </div>
+        <div class="range-row">
+          <div class="range-label"><span>Min mass</span><span id="val-minmass">0</span></div>
+          <input id="minmass" type="range" min="0" max="500" step="5" value="0">
+        </div>
+      </details>
+
+      <button class="btn-primary" type="button" id="refresh-btn">Refresh preview</button>
+    </div>
+  </aside>
+
+  <main class="cine-main">
+    <div class="main-header">
+      <div class="job-title">Preprocessing explorer</div>
+      <div class="job-desc">Frame 0 discarded (camera triggering). Tune filters and inspect particles in a center window.</div>
+    </div>
+    <div class="content">
+      <div class="status-line" id="status-line">Loading…</div>
+      <div class="meta-bar" id="meta-bar"></div>
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="pipeline">Pipeline steps</button>
+        <button class="tab-btn" data-tab="compare_stretch">Percentile → bg</button>
+        <button class="tab-btn" data-tab="compare_bandpass">Bandpass → bg</button>
+        <button class="tab-btn" data-tab="compare_threshold">Bandpass → thr</button>
+        <button class="tab-btn" data-tab="compare_gaussian">Gaussian → percentile</button>
+        <button class="tab-btn" data-tab="detection">Particle detection</button>
+      </div>
+      <div id="tab-pipeline" class="tab-panel"><div class="img-grid" id="grid-pipeline"></div></div>
+      <div id="tab-compare_stretch" class="tab-panel" hidden><div class="img-grid" id="grid-compare-stretch"></div></div>
+      <div id="tab-compare_bandpass" class="tab-panel" hidden><div class="img-grid" id="grid-compare-bandpass"></div></div>
+      <div id="tab-compare_threshold" class="tab-panel" hidden><div class="img-grid" id="grid-compare-threshold"></div></div>
+      <div id="tab-compare_gaussian" class="tab-panel" hidden><div class="img-grid" id="grid-compare-gaussian"></div></div>
+      <div id="tab-detection" class="tab-panel" hidden>
+        <div class="detect-grid">
+          <div class="img-card"><div class="img-card-title" id="det-raw-title">Raw</div><img id="det-raw" alt="raw"></div>
+          <div class="img-card"><div class="img-card-title" id="det-proc-title">Processed</div><img id="det-proc" alt="processed"></div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="particles-table">
+            <thead><tr><th>x</th><th>y</th><th>mass</th><th>size</th><th>signal</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+let config = null;
+let refreshTimer = null;
+function $(id) { return document.getElementById(id); }
+function bindRange(id, valId) {
+  const el = $(id), val = $(valId);
+  el.addEventListener('input', () => { val.textContent = el.value; scheduleRefresh(); });
+}
+function bindInstant(id, fn) {
+  $(id).addEventListener('change', fn || scheduleRefresh);
+  if ($(id).tagName === 'INPUT' && $(id).type === 'text') $(id).addEventListener('input', scheduleRefresh);
+}
+function setStatus(msg, isError=false) {
+  const el = $('status-line');
+  el.textContent = msg;
+  el.classList.toggle('error', isError);
+}
+function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refreshPreview, 350); }
+function collectParams() {
+  return {
+    percentile_low: parseFloat($('percentile-low').value),
+    percentile_high: parseFloat($('percentile-high').value),
+    gaussian_blur_ksize: parseInt($('gaussian-blur').value, 10),
+    tophat_ksize: parseInt($('tophat').value, 10),
+    bg_gaussian_ksize: parseInt($('bg-gaussian').value, 10),
+    bg_median_ksize: parseInt($('bg-median').value, 10),
+    bandpass_lshort: parseInt($('bp-short').value, 10),
+    bandpass_llong: parseInt($('bp-long').value, 10),
+    bp_threshold_percentile: parseFloat($('bp-thr').value),
+    bp_threshold_abs: parseFloat($('bp-thr-abs').value),
+    rolling_ball_radius: parseInt($('rb-radius').value, 10),
+    morph_open_ksize: parseInt($('morph-open').value, 10),
+    bandpass_bg_method: $('bp-bg-method').value,
+    bg_clip_percentile: parseFloat($('bg-clip').value),
+  };
+}
+function collectBody() {
+  return {
+    run_dir: $('run-dir').value.trim(),
+    camera: $('camera').value,
+    frame_index: parseInt($('frame-index').value, 10),
+    center_window: parseInt($('center-window').value, 10),
+    display_vmax: parseFloat($('display-vmax').value),
+    pipeline_key: $('pipeline').value,
+    params: collectParams(),
+    particle_diameter: parseInt($('diameter').value, 10),
+    threshold: parseInt($('threshold').value, 10),
+    minmass: parseInt($('minmass').value, 10),
+  };
+}
+function fillImageGrid(containerId, items) {
+  const grid = $(containerId);
+  grid.innerHTML = '';
+  for (const item of items || []) {
+    const card = document.createElement('div');
+    card.className = 'img-card';
+    card.innerHTML = `<div class="img-card-title">${item.title}</div><img alt="">`;
+    card.querySelector('img').src = 'data:image/png;base64,' + item.image;
+    grid.appendChild(card);
+  }
+}
+function renderMeta(meta) {
+  if (!meta) { $('meta-bar').innerHTML = ''; return; }
+  $('meta-bar').innerHTML = `<strong>${meta.camera}</strong> frame ${meta.frame_index} / ${meta.n_frames - 1} · shape ${meta.shape.join('×')} · min/max/mean ${meta.min}/${meta.max}/${meta.mean.toFixed(2)} · ROI [${meta.roi.join(', ')}] · <strong>${meta.pipeline_title}</strong>`;
+  $('frame-index').max = Math.max(0, meta.n_frames - 1);
+}
+function renderDetection(det) {
+  $('det-raw-title').textContent = `Raw (${det.count_roi} in window, ${det.count_full} full frame)`;
+  $('det-proc-title').textContent = `Processed (${det.count_roi} in window)`;
+  $('det-raw').src = 'data:image/png;base64,' + det.raw_image;
+  $('det-proc').src = 'data:image/png;base64,' + det.processed_image;
+  const tbody = $('particles-table').querySelector('tbody');
+  tbody.innerHTML = '';
+  for (const p of det.particles || []) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${p.x.toFixed(2)}</td><td>${p.y.toFixed(2)}</td><td>${p.mass.toFixed(1)}</td><td>${p.size.toFixed(3)}</td><td>${p.signal.toFixed(1)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+function renderPayload(payload) {
+  renderMeta(payload.meta);
+  fillImageGrid('grid-pipeline', payload.pipeline);
+  fillImageGrid('grid-compare-stretch', payload.compare_stretch);
+  fillImageGrid('grid-compare-bandpass', payload.compare_bandpass);
+  fillImageGrid('grid-compare-threshold', payload.compare_threshold);
+  fillImageGrid('grid-compare-gaussian', payload.compare_gaussian);
+  renderDetection(payload.detection);
+}
+async function loadCameras() {
+  const runDir = $('run-dir').value.trim();
+  if (!runDir) return;
+  const res = await fetch('/api/cameras?' + new URLSearchParams({ run_dir: runDir }));
+  if (!res.ok) return;
+  const data = await res.json();
+  const sel = $('camera');
+  const prev = sel.value;
+  sel.innerHTML = data.cameras.map(c => `<option value="${c}">${c}</option>`).join('');
+  if (data.cameras.includes(prev)) sel.value = prev;
+  if (data.n_frames != null) $('frame-index').max = Math.max(0, data.n_frames - 1);
+}
+async function refreshPreview() {
+  setStatus('Rendering…');
+  try {
+    const res = await fetch('/api/render', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(collectBody()),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    renderPayload(data);
+    setStatus('Updated ' + new Date().toLocaleTimeString());
+  } catch (err) {
+    setStatus(err.message || String(err), true);
+  }
+}
+function selectTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach(panel => panel.hidden = !panel.id.endsWith(tab));
+}
+async function initPage() {
+  bindRange('center-window', 'val-center-window');
+  bindRange('display-vmax', 'val-display-vmax');
+  bindRange('percentile-low', 'val-percentile-low');
+  bindRange('percentile-high', 'val-percentile-high');
+  bindRange('gaussian-blur', 'val-gaussian-blur');
+  bindRange('tophat', 'val-tophat');
+  bindRange('bg-gaussian', 'val-bg-gaussian');
+  bindRange('bg-median', 'val-bg-median');
+  bindRange('bp-short', 'val-bp-short');
+  bindRange('bp-long', 'val-bp-long');
+  bindRange('bp-thr', 'val-bp-thr');
+  bindRange('bp-thr-abs', 'val-bp-thr-abs');
+  bindRange('rb-radius', 'val-rb-radius');
+  bindRange('morph-open', 'val-morph-open');
+  bindRange('bg-clip', 'val-bg-clip');
+  bindInstant('bp-bg-method');
+  bindRange('diameter', 'val-diameter');
+  bindRange('threshold', 'val-threshold');
+  bindRange('minmass', 'val-minmass');
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => selectTab(btn.dataset.tab)));
+  $('refresh-btn').addEventListener('click', refreshPreview);
+  config = await (await fetch('/api/config')).json();
+  $('run-select').innerHTML = config.runs.map(r => `<option value="${r.path}">${r.label}</option>`).join('');
+  $('run-dir').value = config.default_run_dir;
+  $('run-select').addEventListener('change', async () => { $('run-dir').value = $('run-select').value; await loadCameras(); scheduleRefresh(); });
+  bindInstant('run-dir', async () => { await loadCameras(); scheduleRefresh(); });
+  bindInstant('camera'); bindInstant('frame-index'); bindInstant('pipeline');
+  $('pipeline').innerHTML = config.pipelines.map(p => `<option value="${p.key}">${p.label}</option>`).join('');
+  $('pipeline').value = config.default_pipeline;
+  await loadCameras();
+  await refreshPreview();
+}
+initPage();
+</script>
+{% endblock %}

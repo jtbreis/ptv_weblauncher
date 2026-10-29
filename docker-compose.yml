@@ -13,7 +13,21 @@ services:
       - /home/julian/code/4d-ptv-mcflow:/repo                   # your project repo root
       - ./jobs.yaml:/config/jobs.yaml              # job definitions
       - ./run_history.json:/config/run_history.json # persisted run history (create empty file or let app write)
+      - ./active_runs.json:/config/active_runs.json # in-flight docker jobs (reattach after restart)
+      # Live-mount launcher code (avoid rebuild on every edit)
+      - ./app.py:/app/app.py:ro
+      - ./data_runs.py:/app/data_runs.py:ro
+      - ./templates:/app/templates:ro
+    # Pipeline data disks — read-write required for step write-protect (chmod)
+      - /mnt/raid1:/mnt/raid1
+      - /mnt/ssd:/mnt/ssd
     environment:
       - JOBS_CONFIG=/config/jobs.yaml
       - REPO_ROOT=/repo
       - RUN_HISTORY_PATH=/config/run_history.json
+      - ACTIVE_RUNS_PATH=/config/active_runs.json
+      - TZ=America/Los_Angeles
+      - PROCESSED_DATA_ROOT=/mnt/raid1
+      - DATA_ROOT=/mnt/ssd
+      - DATA_DEFAULT_BASE=Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+      - FLASK_TEMPLATES_AUTO_RELOAD=1

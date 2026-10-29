@@ -2,28 +2,53 @@ ntfy:
   topic: "your-topic-here"           # replace with your ntfy topic
   server: "https://ntfy.sh"
 
+# Data layout (see .devcontainer/devcontainer.json mounts):
+#   /mnt/raid1  → processed_data/  Centers_*, rays.h5
+#   /mnt/ssd    → data/            rays_out_cpp.h5, tracks.h5part
+# Case tree: Windtunnel_PTV_TNTI/X300cm_PTV_{above,below,center}_TNTI/{CASE}/{RUN}/
+
 jobs:
   - id: compute_rays
     name: Compute Rays (All Runs)
-    description: Compute rays for all runs in a case. Run after center finding.
+    description: Compute rays for all runs in a case. Reads Centers_TH1/TH2 from processed_data; writes rays.h5 alongside them.
     script: ./docker/compute_rays_all_runs/run_compute_rays_all_runs.sh
     args: ["run"]
     env:
+      - name: INPUT_DIR
+        label: Input Host Directory
+        default: ""
+        placeholder: /mnt/raid1 (leave empty = same as output)
+        help: "Host path for Centers_* input. Default empty — reads from Output Host Directory (/mnt/raid1)."
+      - name: INPUT_BASE
+        label: Input Base Path
+        default: ""
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        help: "Parent of {CASE} under the input mount. Empty = use Output Base Path."
       - name: OUTPUT_DIR
-        label: Output Directory
-        default: /mnt/raid
+        label: Output Host Directory
+        default: /mnt/raid1
         required: true
+        help: "Host path for processed_data (mounted read-write). Default /mnt/raid1."
       - name: OUTPUT_BASE
         label: Output Base Path
-        default: data/low_threshold/PTV_above
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        help: "Container path under the output mount to {CASE}/{RUN}/. Use data/Windtunnel_PTV_TNTI/X300cm_PTV_{above,below,center}_TNTI."
       - name: CASE
         label: Case
-        default: TTI_no_gravity
-        placeholder: e.g. TTI_no_gravity
+        default: TNTI_no_gravity
+        placeholder: e.g. TNTI_aligned_with_gravity
       - name: RUNS
         label: Runs (comma-separated)
         default: ""
         placeholder: e.g. Run1,Run2 (leave empty for all)
+      - name: RAYS_CENTERS_THRESHOLD
+        label: Centers threshold (TH1 / TH2)
+        type: per_camera_select
+        options: [TH1, TH2]
+        default: TH1
+        cameras: 4
+        help: "Set the threshold folder independently for each camera (1–4, calibration order). Cameras can mix TH1 and TH2 — e.g. TH1,TH1,TH2,TH2."
       - name: RAYS_CENTER_ROTATE
         label: Center Rotate (per camera)
         default: cw,cw,ccw,ccw
@@ -34,6 +59,10 @@ jobs:
       - name: RAYS_IMAGE_HEIGHT
         label: Image Height (px)
         default: "1600"
+      - name: RAYS_WRITE_PROTECT
+        label: Write-protect rays.h5 after writing
+        type: checkbox
+        default: false
       - name: H5_FLUSH_EVERY
         label: H5 Flush Every
         default: ""
@@ -48,20 +77,32 @@ jobs:
 
   - id: stereo_matching
     name: Stereo Matching (All Runs)
-    description: STM for all runs in a case. Expects rays.h5 per run (after compute rays).
+    description: STM for all runs. Reads rays.h5 from processed_data; writes rays_out_cpp.h5 to data.
     script: ./docker/stereo_matching_all_runs/run_stereo_matching_all_runs.sh
     args: ["run"]
     env:
+      - name: INPUT_DIR
+        label: Input Host Directory
+        default: /mnt/raid1
+        help: "Host path for rays.h5 input (processed_data disk). Default /mnt/raid1."
+      - name: INPUT_BASE
+        label: Input Base Path
+        default: Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        placeholder: Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        help: "Parent of {CASE} on the input mount (no data/ prefix when Input Host Directory ≠ output). Reads rays.h5 from here."
       - name: OUTPUT_DIR
-        label: Output Directory
-        default: /mnt/raid
+        label: Output Host Directory
+        default: /mnt/ssd
         required: true
+        help: "Host path for data/ outputs (mounted read-write). Default /mnt/ssd."
       - name: OUTPUT_BASE
         label: Output Base Path
-        default: data/low_threshold/PTV_above
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        help: "Container path under the output mount to {CASE}/{RUN}/. Writes rays_out_cpp.h5 here."
       - name: CASE
         label: Case
-        default: TTI_no_gravity
+        default: TNTI_no_gravity
       - name: RUNS
         label: Runs (comma-separated)
         default: Run1
@@ -100,32 +141,78 @@ jobs:
       - name: FRAME_PARALLELISM
         label: Frame Parallelism
         default: "6"
+      - name: MAX_FRAMES
+        label: Max Frames (smoke test)
+        default: ""
+        placeholder: e.g. 12 (leave empty for all frames)
+        help: "Only stereo-match the first N frames from rays.h5. Useful for quick test runs."
+      - name: RESUME
+        label: Resume from existing rays_out_cpp.h5
+        type: checkbox
+        default: false
+        help: "Keep an existing output file and skip frames that already have complete matches. Useful after a crash or stop."
+      - name: NO_WRITE_PARTICLE_PROPS
+        label: Skip writing particle props
+        type: checkbox
+        default: false
+        help: "Do not copy diameter/intensity/mass from rays.h5 into rays_out_cpp.h5."
+      - name: NO_WRITE_DIAMETER
+        label: Skip writing diameter
+        type: checkbox
+        default: false
+        help: "Omit the diameter dataset (ignored if Skip writing particle props is checked)."
+      - name: NO_WRITE_INTENSITY
+        label: Skip writing intensity
+        type: checkbox
+        default: false
+        help: "Omit the intensity dataset (ignored if Skip writing particle props is checked)."
+      - name: NO_WRITE_MASS
+        label: Skip writing mass
+        type: checkbox
+        default: false
+        help: "Omit the mass dataset (ignored if Skip writing particle props is checked)."
       - name: IMAGE_NAME
         label: Docker Image Name
         default: 4d-ptv-stereo-matching-all-runs
 
   - id: tracking
     name: Tracking / 4-Frame (All Runs)
-    description: 4-frame tracking for all runs. Expects rays_out_cpp.h5 (after stereo matching). Requires 4BE-ETI in the image build context.
+    description: 4-frame tracking for all runs. Reads rays_out_cpp.h5 from data; writes tracks to data.
     script: ./docker/tracking_all_runs/run_tracking_all_runs.sh
     args: ["run"]
     env:
+      - name: INPUT_DIR
+        label: Input Host Directory
+        default: ""
+        placeholder: /mnt/ssd (leave empty = same as output)
+        help: "Host path for rays_out_cpp.h5 input. Default empty — reads from Output Host Directory (/mnt/ssd)."
+      - name: INPUT_BASE
+        label: Input Base Path
+        default: ""
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        help: "Parent of {CASE} under the input mount. Empty = use Output Base Path."
       - name: OUTPUT_DIR
-        label: Output Directory
-        default: /mnt/raid
+        label: Output Host Directory
+        default: /mnt/ssd
         required: true
+        help: "Host path for data/ outputs (mounted read-write). Default /mnt/ssd."
       - name: OUTPUT_BASE
         label: Output Base Path
-        default: data/low_threshold/PTV_above
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        help: "Container path under the output mount to {CASE}/{RUN}/. Writes tracks.h5part here."
       - name: CASE
         label: Case
-        default: TTI_no_gravity
+        default: TNTI_no_gravity
       - name: RUNS
         label: Runs (comma-separated)
         default: Run1
       - name: WORKERS
         label: Workers
         default: "64"
+      - name: TRACKING_QUIET
+        label: Quiet tracking logs (set to 1)
+        default: "1"
       - name: BOX_SIZE_X
         label: Box Size X
         default: "3.5"
@@ -157,10 +244,16 @@ jobs:
         label: Rays Filename
         default: ""
         placeholder: default rays_out_cpp.h5 if empty
-      - name: MAX_FRAME_RANGES
-        label: Max Frame Ranges (smoke test)
+      - name: MAX_FRAMES
+        label: Max Frames (smoke test)
         default: ""
-        placeholder: e.g. 3 to limit frames
+        placeholder: e.g. 12 (leave empty for all frames)
+        help: "Cap frames processed per run. Tracking runs in 4-frame batches (e.g. 12 → batches 0–2, frames 0–11)."
+      - name: MAX_FRAME_RANGES
+        label: Max 4-Frame Batches (advanced)
+        default: ""
+        placeholder: e.g. 3 (overrides Max Frames if set)
+        help: "Process only the first N non-overlapping 4-frame batches. Prefer Max Frames unless you need exact batch control."
       - name: NO_WRITE_PARAVIEW
         label: No Write Paraview (set to 1)
         default: ""
@@ -170,3 +263,598 @@ jobs:
       - name: IMAGE_NAME
         label: Docker Image Name
         default: 4d-ptv-tracking-all-runs
+
+  - id: graph_tracking
+    name: Graph Tracking / 4-Frame (All Runs)
+    description: Graph-based 4-frame tracking for all runs. Reads rays_out_cpp.h5; writes tracks_graph_staging.h5part to data.
+    script: ./docker/graph_tracking_all_runs/run_graph_tracking_all_runs.sh
+    args: ["run"]
+    env:
+      - name: INPUT_DIR
+        label: Input Host Directory
+        default: ""
+        placeholder: /mnt/ssd (leave empty = same as output)
+        help: "Host path for rays_out_cpp.h5 input. Default empty — reads from Output Host Directory."
+      - name: INPUT_BASE
+        label: Input Base Path
+        default: ""
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        help: "Parent of {CASE} under the input mount. Empty = use Output Base Path."
+      - name: OUTPUT_DIR
+        label: Output Host Directory
+        default: /mnt/ssd
+        required: true
+        help: "Host path for data/ outputs (mounted read-write). Default /mnt/ssd."
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        help: "Container path under the output mount to {CASE}/{RUN}/."
+      - name: CASE
+        label: Case
+        default: TNTI_opposing_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+      - name: WORKERS
+        label: Workers
+        default: "8"
+        help: "Parallel workers for load-balanced 4-frame block batches per run."
+      - name: TRACKING_QUIET
+        label: Quiet tracking logs (set to 1)
+        default: "1"
+      - name: BOX_SIZE_INITIAL_X_LO
+        label: Initial X Low (mm offset from seed)
+        default: "0.0"
+      - name: BOX_SIZE_INITIAL_X_HI
+        label: Initial X High (mm offset from seed)
+        default: "3.5"
+      - name: BOX_SIZE_Y
+        label: Initial Y Half-Width (mm)
+        default: "1.5"
+      - name: BOX_SIZE_Z
+        label: Initial Z Half-Width (mm)
+        default: "1.5"
+      - name: BOX_SIZE_TRACK
+        label: Box Size Track (mm)
+        default: "0.2"
+      - name: MAX_BRANCH
+        label: Max Branch
+        default: "30"
+      - name: MAX_SEEDS
+        label: Max Seeds (0 = all)
+        default: "0"
+      - name: USE_BIDIRECTIONAL_GRAPH
+        label: Bidirectional graph (forward + backward)
+        type: checkbox
+        default: false
+        help: "Merge forward and backward 4-frame graphs; keep only consensus 4-frame paths."
+      - name: NO_3_FRAME
+        label: 4-frame tracks only
+        type: checkbox
+        default: false
+      - name: MIN_TRACK_LENGTH
+        label: Min Track Length (frames)
+        default: "3"
+      - name: DT
+        label: DT
+        default: "1e-3"
+      - name: REP_RATE
+        label: Rep Rate
+        default: "10"
+      - name: POSITION_UNIT
+        label: Position Unit
+        default: mm
+      - name: RAYS_FILENAME
+        label: Rays Filename
+        default: ""
+        placeholder: default rays_out_cpp.h5 if empty
+      - name: MAX_FRAMES
+        label: Max Frames (smoke test)
+        default: ""
+        placeholder: e.g. 12 (leave empty for all frames)
+        help: "Cap frames processed per run (converted to 4-frame block count)."
+      - name: MAX_BLOCKS
+        label: Max 4-Frame Blocks (advanced)
+        default: ""
+        placeholder: e.g. 3 (overrides Max Frames if set)
+      - name: IMAGE_NAME
+        label: Docker Image Name
+        default: 4d-ptv-graph-tracking-all-runs
+
+  - id: pdf_relaxed_tracking
+    name: PDF Relaxed Tracking
+    requires_docker: false
+    description: >
+      Seed graph tracking on low-error STM particles, build a velocity PDF (e.g. v_x),
+      then iteratively relax the error threshold. Each round links only still-unmatched
+      detections; new tracks must have segment velocities inside the PDF. Matched
+      detections are reserved and excluded from later rounds. Writes rays_out_pdf_filtered.h5,
+      tracks_pdf_relaxed.h5part, per-pass tracks_pdf_pass_*.h5part after seed and each
+      relaxation step, and pdf_tracking_summary.json.
+    script: ./ptv_weblauncher/run_pdf_relaxed_tracking.sh
+    args: []
+    env:
+      - name: OUTPUT_DIR
+        label: Output Host Directory
+        default: /mnt/ssd
+        required: true
+        help: "Host path for data/ outputs (mounted read-write)."
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+      - name: CASE
+        label: Case
+        default: TNTI_opposing_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+      - name: STM_FILENAME
+        label: STM input filename
+        default: rays_out_cpp.h5
+        help: "High maxdistance STM file (must include xyze error row)."
+      - name: INITIAL_MAX_ERROR
+        label: "Filtering: seed max error"
+        default: "0.05"
+        help: "Tightest stereomatching error accepted in the seed pass; defines the PDF reference pool."
+      - name: MAX_ERROR
+        label: "Filtering: relaxation ceiling"
+        default: "0.2"
+        help: "Final error threshold in the sweep. Leave 0 to use maxdistance from STM file attrs."
+      - name: ERROR_STEP
+        label: "Filtering: error step"
+        default: "0.01"
+        help: "Increment between relaxation passes."
+      - name: PDF_VARIABLE
+        label: "Filtering: PDF kinematic variable"
+        default: vx
+        help: "vx, vy, vz, or speed — gate for relaxation passes after seed."
+      - name: PDF_PERCENTILE_LO
+        label: "Filtering: PDF percentile low"
+        default: "1"
+      - name: PDF_PERCENTILE_HI
+        label: "Filtering: PDF percentile high"
+        default: "99"
+      - name: DT
+        label: DT (s)
+        default: "1e-3"
+      - name: BOX_SIZE_TRACK
+        label: "Graph linking: hop limit (mm)"
+        default: "0.2"
+        help: "Max prediction-to-detection distance when enumerating candidate paths (build once)."
+      - name: WORKERS
+        label: Workers
+        default: "4"
+      - name: MAX_BLOCKS
+        label: Max 4-Frame Blocks (smoke test)
+        default: ""
+        placeholder: e.g. 3 (leave empty for all)
+      - name: MIN_TRACK_LENGTH
+        label: "Graph linking: min track length"
+        default: "3"
+      - name: BOX_SIZE_INITIAL_X_LO
+        label: "Graph linking: search box X low (mm)"
+        default: "0.0"
+      - name: BOX_SIZE_INITIAL_X_HI
+        label: "Graph linking: search box X high (mm)"
+        default: "3.5"
+      - name: BOX_SIZE_Y
+        label: "Graph linking: search box Y half-width (mm)"
+        default: "1.5"
+      - name: BOX_SIZE_Z
+        label: "Graph linking: search box Z half-width (mm)"
+        default: "1.5"
+      - name: MAX_BRANCH
+        label: "Graph linking: max branch"
+        default: "30"
+      - name: MAX_SEEDS
+        label: "Graph linking: max seeds (0 = all)"
+        default: "0"
+      - name: USE_BIDIRECTIONAL_GRAPH
+        label: Bidirectional graph (forward + backward)
+        type: checkbox
+        default: false
+        help: "Merge forward and backward 4-frame graphs; keep only consensus 4-frame paths."
+      - name: NO_3_FRAME
+        label: 4-frame tracks only
+        type: checkbox
+        default: false
+        help: "Disable 3-frame path candidates; recommended with bidirectional mode."
+
+  - id: error_sensitivity_tracking
+    name: Error Sensitivity Tracking
+    requires_docker: false
+    description: >
+      Sweep stereomatching error thresholds on a high-threshold STM file. For each
+      error ceiling, filter particles in-memory (error <= threshold), run graph tracking
+      in parallel batches, and write tracks_error_*.h5part files plus
+      error_sensitivity_summary.json. PDF sensitivity plots are written automatically
+      to STM_error_sensitivity/ when tracking finishes (or re-run analysis-only).
+    script: ./ptv_weblauncher/run_error_sensitivity_tracking.sh
+    args: []
+    env:
+      - name: OUTPUT_DIR
+        label: Output Host Directory
+        default: /mnt/ssd
+        required: true
+        help: "Host path for data/ outputs (mounted read-write)."
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+      - name: CASE
+        label: Case
+        default: TNTI_opposing_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+      - name: STM_FILENAME
+        label: STM input filename
+        default: rays_out_cpp.h5
+        help: "High maxdistance STM file (must include xyze error row)."
+      - name: ERROR_MIN
+        label: "Filtering: first error threshold"
+        default: "0.05"
+        help: "First stereomatching error ceiling in the sweep (STM pool filter)."
+      - name: ERROR_MAX
+        label: "Filtering: last error threshold"
+        default: "0.2"
+        help: "Last error threshold; leave 0 to use maxdistance from STM file attrs."
+      - name: ERROR_STEP
+        label: "Filtering: error step"
+        default: "0.01"
+      - name: DT
+        label: DT (s)
+        default: "1e-3"
+      - name: BOX_SIZE_TRACK
+        label: "Graph linking: hop limit (mm)"
+        default: "0.2"
+        help: "Max prediction-to-detection distance when building candidate paths."
+      - name: WORKERS
+        label: Workers
+        default: "4"
+      - name: MAX_BLOCKS
+        label: Max 4-Frame Blocks (smoke test)
+        default: ""
+        placeholder: e.g. 3 (leave empty for all)
+      - name: MIN_TRACK_LENGTH
+        label: "Graph linking: min track length"
+        default: "3"
+      - name: BOX_SIZE_INITIAL_X_LO
+        label: "Graph linking: search box X low (mm)"
+        default: "0.0"
+      - name: BOX_SIZE_INITIAL_X_HI
+        label: "Graph linking: search box X high (mm)"
+        default: "3.5"
+      - name: BOX_SIZE_Y
+        label: "Graph linking: search box Y half-width (mm)"
+        default: "1.5"
+      - name: BOX_SIZE_Z
+        label: "Graph linking: search box Z half-width (mm)"
+        default: "1.5"
+      - name: MAX_BRANCH
+        label: "Graph linking: max branch"
+        default: "30"
+      - name: MAX_SEEDS
+        label: "Graph linking: max seeds (0 = all)"
+        default: "0"
+      - name: USE_BIDIRECTIONAL_GRAPH
+        label: Bidirectional graph (forward + backward)
+        type: checkbox
+        default: false
+      - name: NO_3_FRAME
+        label: 4-frame tracks only
+        type: checkbox
+        default: false
+      - name: SKIP_EXISTING
+        label: Skip existing track files
+        type: checkbox
+        default: false
+        help: "Skip error thresholds whose tracks_error_*.h5part already exists."
+      - name: SKIP_SENSITIVITY_ANALYSIS
+        label: Skip PDF analysis after tracking
+        type: checkbox
+        default: false
+        help: "Run tracking only; generate PDFs later via analysis-only job."
+
+  - id: error_sensitivity_analysis
+    name: Error Sensitivity Analysis (plots only)
+    requires_docker: false
+    description: >
+      Generate PDF sensitivity plots from existing tracks_error_*.h5part files in a run
+      folder (tracks per 4-frame snapshot, velocity/acceleration PDFs and statistics,
+      velocity–acceleration 2D heatmaps (one page per sweep value)). Use after tracking has finished or to
+      refresh plots without re-tracking.
+    script: ./ptv_weblauncher/run_error_sensitivity_tracking.sh
+    args: []
+    env:
+      - name: OUTPUT_DIR
+        label: Output Host Directory
+        default: /mnt/ssd
+        required: true
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+      - name: CASE
+        label: Case
+        default: TNTI_opposing_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+      - name: ANALYSIS_ONLY
+        label: Analysis only mode
+        type: checkbox
+        default: true
+
+  - id: box_size_sensitivity_tracking
+    name: Box Size Sensitivity Tracking
+    requires_docker: false
+    description: >
+      Sweep box_size_track from a small to larger hop limit. For each value, run graph
+      tracking and write tracks_box_size_*.h5part plus box_size_sensitivity_summary.json.
+      PDF sensitivity plots are written automatically to box_size_sensitivity/ when
+      tracking finishes (or re-run analysis-only).
+    script: ./ptv_weblauncher/run_box_size_sensitivity_tracking.sh
+    args: []
+    env:
+      - name: OUTPUT_DIR
+        label: Output Host Directory
+        default: /mnt/ssd
+        required: true
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+      - name: CASE
+        label: Case
+        default: TNTI_opposing_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+      - name: STM_FILENAME
+        label: STM input filename
+        default: rays_out_cpp.h5
+      - name: BOX_SIZE_MIN
+        label: "Sweep: first box_size_track (mm)"
+        default: "0.05"
+        help: "Smallest hop limit in the sweep."
+      - name: BOX_SIZE_MAX
+        label: "Sweep: last box_size_track (mm)"
+        default: "0.50"
+        help: "Largest hop limit in the sweep."
+      - name: BOX_SIZE_STEP
+        label: "Sweep: box_size step (mm)"
+        default: "0.05"
+      - name: MAX_STEREO_ERROR
+        label: "Optional STM error ceiling"
+        default: ""
+        help: "If set, only particles with error <= this value enter the pool for all runs."
+      - name: DT
+        label: DT (s)
+        default: "1e-3"
+      - name: WORKERS
+        label: Workers
+        default: "4"
+      - name: MAX_BLOCKS
+        label: Max 4-Frame Blocks (smoke test)
+        default: ""
+      - name: MIN_TRACK_LENGTH
+        label: Min track length
+        default: "4"
+      - name: BOX_SIZE_INITIAL_X_LO
+        label: "Graph linking: search box X low (mm)"
+        default: "0.0"
+      - name: BOX_SIZE_INITIAL_X_HI
+        label: "Graph linking: search box X high (mm)"
+        default: "3.5"
+      - name: BOX_SIZE_Y
+        label: "Graph linking: search box Y half-width (mm)"
+        default: "1.5"
+      - name: BOX_SIZE_Z
+        label: "Graph linking: search box Z half-width (mm)"
+        default: "1.5"
+      - name: MAX_BRANCH
+        label: "Graph linking: max branch"
+        default: "30"
+      - name: MAX_SEEDS
+        label: "Graph linking: max seeds (0 = all)"
+        default: "0"
+      - name: USE_BIDIRECTIONAL_GRAPH
+        label: Bidirectional graph (forward + backward)
+        type: checkbox
+        default: false
+      - name: NO_3_FRAME
+        label: 4-frame tracks only
+        type: checkbox
+        default: false
+      - name: SKIP_EXISTING
+        label: Skip existing track files
+        type: checkbox
+        default: false
+        help: "Skip box_size values whose tracks_box_size_*.h5part already exists."
+      - name: SKIP_SENSITIVITY_ANALYSIS
+        label: Skip PDF analysis after tracking
+        type: checkbox
+        default: false
+        help: "Run tracking only; generate PDFs later via analysis-only job."
+
+  - id: box_size_sensitivity_analysis
+    name: Box Size Sensitivity Analysis (plots only)
+    requires_docker: false
+    description: >
+      Generate PDF sensitivity plots from existing tracks_box_size_*.h5part files
+      (tracks per 4-frame snapshot, velocity/acceleration statistics, velocity–acceleration
+      velocity–acceleration 2D heatmaps (one page per sweep value)). Use after the box_size sweep has finished or to refresh plots
+      without re-tracking.
+    script: ./ptv_weblauncher/run_box_size_sensitivity_tracking.sh
+    args: []
+    env:
+      - name: OUTPUT_DIR
+        label: Output Host Directory
+        default: /mnt/ssd
+        required: true
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+      - name: CASE
+        label: Case
+        default: TNTI_opposing_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+      - name: ANALYSIS_ONLY
+        label: Analysis only mode
+        type: checkbox
+        default: true
+
+  - id: box_relaxed_tracking
+    name: Box Relaxed Tracking
+    requires_docker: false
+    description: >
+      Set initial tracking parameters, then progressively relax box_size_track. At the
+      tightest hop limit, detect the velocity histogram peak per block and gate to
+      peak ± σ; each relax pass widens the velocity window and increases hop limit.
+    script: ./ptv_weblauncher/run_box_relaxed_tracking.sh
+    args: []
+    env:
+      - name: OUTPUT_DIR
+        label: Output Host Directory
+        default: /mnt/ssd
+        required: true
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+      - name: CASE
+        label: Case
+        default: TNTI_opposing_gravity
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+      - name: STM_FILENAME
+        label: STM input filename
+        default: rays_out_cpp.h5
+      - name: MAX_STEREO_ERROR
+        label: "Initial tracking: STM error ceiling"
+        default: "0.1"
+        help: "Only particles with stereomatching error <= this value enter the pool."
+      - name: BOX_SIZE_INITIAL_X_LO
+        label: "Initial tracking: search box X low (mm)"
+        default: "0.0"
+      - name: BOX_SIZE_INITIAL_X_HI
+        label: "Initial tracking: search box X high (mm)"
+        default: "3.5"
+      - name: BOX_SIZE_Y
+        label: "Initial tracking: search box Y half-width (mm)"
+        default: "1.5"
+      - name: BOX_SIZE_Z
+        label: "Initial tracking: search box Z half-width (mm)"
+        default: "1.5"
+      - name: MAX_BRANCH
+        label: "Initial tracking: max branch"
+        default: "30"
+      - name: MAX_SEEDS
+        label: "Initial tracking: max seeds (0 = all)"
+        default: "0"
+      - name: MIN_TRACK_LENGTH
+        label: "Initial tracking: min track length"
+        default: "3"
+      - name: USE_BIDIRECTIONAL_GRAPH
+        label: Bidirectional graph
+        type: checkbox
+        default: false
+      - name: NO_3_FRAME
+        label: 4-frame tracks only
+        type: checkbox
+        default: false
+      - name: BOX_SIZE_MIN
+        label: "Relaxation: initial hop limit (mm)"
+        default: "0.15"
+        help: "Tightest box_size_track; seed pass and dominant-bin reference."
+      - name: BOX_SIZE_MAX
+        label: "Relaxation: max hop limit (mm)"
+        default: "0.5"
+        help: "Loosest hop limit in the sweep; also used when building the candidate graph."
+      - name: BOX_SIZE_STEP
+        label: "Relaxation: hop step (mm)"
+        default: "0.05"
+      - name: VELOCITY_VARIABLE
+        label: "Dominant bin: velocity variable"
+        default: vx
+        help: "Histogram axis for finding the busiest bin at the initial hop limit."
+      - name: VELOCITY_TARGET
+        label: "Peak override (optional)"
+        default: ""
+        help: "Fixed velocity peak. Leave empty to auto-detect from histogram at tight box."
+      - name: VELOCITY_SIGMA
+        label: "Velocity σ (fixed)"
+        default: "1.0"
+        help: "Half-width around detected peak; same for all runs. Seed pass uses ±1σ."
+      - name: VELOCITY_BIN_COUNT
+        label: "Peak histogram bins"
+        default: "0"
+        help: "Coarseness for peak detection at initial hop (0 = auto)."
+      - name: VELOCITY_BAND_MARGIN
+        label: "Max velocity window multiplier"
+        default: "2.0"
+        help: "Widen acceptance to this many × σ by the last relax pass (seed = 1×σ)."
+      - name: DT
+        label: DT (s)
+        default: "1e-3"
+      - name: WORKERS
+        label: Workers
+        default: "4"
+      - name: MAX_BLOCKS
+        label: Max 4-Frame Blocks (smoke test)
+        default: ""
+
+
+  - id: combine_tracks_parquet
+    name: Combine Tracks → Parquet
+    requires_docker: false
+    description: >
+      Combine selected runs' track .h5part files into one Parquet table for post-processing.
+      Choose the tracks filename (4-frame, graph, staging, PDF/box relaxed, etc.) and which
+      Run folders to include. Empty RUNS discovers all Run* dirs that contain that file.
+      Writes {CASE}/{CASE}_{tracks_stem}.parquet (or OUTPUT_NAME) under the case folder.
+    script: ./ptv_weblauncher/run_combine_tracks_parquet.sh
+    args: []
+    env:
+      - name: OUTPUT_DIR
+        label: Output Host Directory
+        default: /mnt/ssd
+        required: true
+        help: "Host path for data/ (mounted read-write)."
+      - name: OUTPUT_BASE
+        label: Output Base Path
+        default: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        placeholder: data/Windtunnel_PTV_TNTI/X300cm_PTV_above_TNTI
+        help: "Path under Output Host Directory to the parent of {CASE}."
+      - name: CASE
+        label: Case
+        default: TNTI_opposing_gravity
+        required: true
+      - name: RUNS
+        label: Runs (comma-separated)
+        default: Run1
+        placeholder: e.g. Run1,Run2 (leave empty for all with tracks file)
+        help: "Which Run folders to combine. Leave empty to auto-detect all Run* that contain TRACKS_NAME."
+      - name: TRACKS_NAME
+        label: Tracks file
+        type: select
+        default: tracks.h5part
+        options:
+          - tracks.h5part
+          - tracks_staging.h5part
+          - tracks_graph.h5part
+          - tracks_graph_staging.h5part
+          - tracks_pdf_relaxed.h5part
+          - tracks_box_relaxed.h5part
+        help: "Filename inside each {CASE}/{Run}/ directory to combine."
+      - name: OUTPUT_NAME
+        label: Output Parquet filename (optional)
+        default: ""
+        placeholder: e.g. TNTI_opposing_gravity_tracks.parquet
+        help: "Written under the case folder. Empty → {CASE}_{tracks_stem}.parquet."
+      - name: WORKERS
+        label: Parallel run loaders
+        default: "8"
